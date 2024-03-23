@@ -21,7 +21,7 @@
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {"ghcr.io/devcontainers/features/nvidia-cuda": {}},
 
-	"runArgs": [ "--gpus", "all" ],
+	"runArgs": [ "--gpus", "1", "--ipc=host", "--shm-size=32000000000" ],
 
 	"mounts": [ "source=nfsvolume,target=/nfs-rl-data"]
 

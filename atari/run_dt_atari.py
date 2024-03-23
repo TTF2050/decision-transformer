@@ -65,6 +65,7 @@ class StateActionReturnDataset(Dataset):
 
         return states, actions, rtgs, timesteps
 
+print("create dataset")
 obss, actions, returns, done_idxs, rtgs, timesteps = create_dataset(args.num_buffers, args.num_steps, args.game, args.data_dir_prefix, args.trajectories_per_buffer)
 
 # set up logging
@@ -74,17 +75,21 @@ logging.basicConfig(
         level=logging.INFO,
 )
 
+print('train_dataset')
 train_dataset = StateActionReturnDataset(obss, args.context_length*3, actions, done_idxs, rtgs, timesteps)
-
+print("GPTConfig")
 mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
                   n_layer=6, n_head=8, n_embd=128, model_type=args.model_type, max_timestep=max(timesteps))
+print ("GPT")
 model = GPT(mconf)
 
 # initialize a trainer instance and kick off training
 epochs = args.epochs
+print("TrainerConfig")
 tconf = TrainerConfig(max_epochs=epochs, batch_size=args.batch_size, learning_rate=6e-4,
                       lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*args.context_length*3,
                       num_workers=4, seed=args.seed, model_type=args.model_type, game=args.game, max_timestep=max(timesteps))
+print("Trainer")
 trainer = Trainer(model, train_dataset, None, tconf)
-
+print("train")
 trainer.train()

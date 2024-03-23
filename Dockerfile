@@ -20,6 +20,8 @@ RUN apt-get update -q \
     python3-venv \
     patchelf \
     cmake \
+    unzip \
+    tensorrt \
     # build-essential \
     # libtbb-dev \
     && apt-get clean \
@@ -89,6 +91,11 @@ ENV PATH /home/user/.env/bin:$PATH
 RUN python -c "import d4rl"
 
 RUN git clone https://github.com/karpathy/minGPT.git && cd minGPT && pip install -e .
+
+
+RUN curl -O https://www.atarimania.com/roms/Atari-2600-VCS-ROM-Collection.zip 
+RUN unzip Atari-2600-VCS-ROM-Collection.zip -d Atari-2600-VCS-ROM-Collection || true
+RUN python -m atari_py.import_roms Atari-2600-VCS-ROM-Collection 
 
 # Copy over just requirements.txt at first. That way, the Docker cache doesn't
 # expire until we actually change the requirements.
