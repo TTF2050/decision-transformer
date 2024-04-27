@@ -29,8 +29,8 @@ class Trainer:
         for _ in range(num_steps):
             train_loss = self.train_step()
             train_losses.append(train_loss)
-            if self.scheduler is not None:
-                self.scheduler.step()
+            # if self.scheduler is not None:
+            #     self.scheduler.step()
 
         logs['time/training'] = time.time() - train_start
 

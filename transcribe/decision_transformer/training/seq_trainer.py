@@ -15,8 +15,8 @@ class SequenceTrainer(Trainer):
             )
 
             act_dim = action_preds.shape[2]
-            action_preds = action_preds.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
-            actions = actions.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
+            action_preds = tf.reshape(action_preds, (-1, act_dim))[tf.reshape(attention_mask, (-1)) > 0]
+            actions = tf.reshape(actions, (-1, act_dim))[tf.reshape(attention_mask,(-1)) > 0]
 
             loss = self.loss_fn(
                 None, action_preds, None,

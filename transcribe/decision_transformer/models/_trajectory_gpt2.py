@@ -244,7 +244,7 @@ class Attention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
+    def __init__(self, n_state, config):  # 
         super().__init__()
         nx = config.n_embd
         self.c_fc = Conv1D(n_state, nx)

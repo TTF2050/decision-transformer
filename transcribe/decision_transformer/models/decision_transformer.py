@@ -17,7 +17,7 @@ class SkipConnectWrapper(tf.keras.layers.Layer):
         self.adder = Add()
 
     def call(self, x):
-        print(f'SkipConnectWrapper.call()')
+        # print(f'SkipConnectWrapper.call()')
         y = self.inner_layer(x)
         return self.adder([x, y])
     
@@ -25,17 +25,17 @@ class SkipConnectWrapper(tf.keras.layers.Layer):
 class GPT2MLP(tf.keras.layers.Layer):
     def __init__(self, n_embed, n_state):
         super().__init__()
-        print(f'GPT2MLP.__init__({n_embed}, {n_state})')
-        self.conv1 = Conv1D(n_state, 1, data_format="channels_first", activation='gelu')
-        self.conv2 = Conv1D(n_embed, 1)
+        # print(f'GPT2MLP.__init__({n_embed}, {n_state})')
+        self.conv1 = Dense(n_state, activation='gelu', name='conv1')
+        self.conv2 = Dense(n_embed, name='conv2')
 
     def call(self, x):
-        print(f'GPT2MLP.call()')
-        print(f'x.shape {x.shape}')
+        # print(f'GPT2MLP.call()')
+        # print(f'x.shape {x.shape}')
         # print(f'conv1 {self.conv1.__dict__}')
         x = self.conv1(x)
         x = self.conv2(x)
-        print(f'return.shape {x.shape}')
+        # print(f'return.shape {x.shape}')
         return x
 
 
@@ -59,7 +59,7 @@ class GPT2Block(tf.keras.layers.Layer):
 
 
     def call(self, x):
-        print(f'GPT2Block.call()')
+        # print(f'GPT2Block.call()')
         y = self.self_attention(self.layer_norm_1(x))
         x = x+y
         y = self.mlp(self.layer_norm_2(x))
@@ -71,7 +71,7 @@ class GPT2Block(tf.keras.layers.Layer):
 class GPT2Stack(tf.keras.Model):
     def __init__(self, *, num_layers, d_model, num_heads, dff, dropout_rate=0.1, **kwargs ):
         super().__init__()
-        print(f'gpt2stack with {num_layers} layers')
+        # print(f'gpt2stack with {num_layers} layers')
         self.dec_layers = Sequential([
             GPT2Block(d_model=d_model, num_heads=num_heads, dff=dff, dropout_rate=dropout_rate)
                 for _ in range(num_layers)
@@ -81,7 +81,7 @@ class GPT2Stack(tf.keras.Model):
         
 
     def call(self, x):
-        print(f'GPT2Stack.call()')
+        # print(f'GPT2Stack.call()')
         return self.layer_norm_final(self.dec_layers(x))
 
 class DecisionTransformer(TrajectoryModel):
@@ -124,9 +124,9 @@ class DecisionTransformer(TrajectoryModel):
         
         # Embedding accepts inputs of a max of 
         self.embed_timestep = Embedding(max_ep_len, hidden_size)
-        self.embed_return = Dense(hidden_size)
-        self.embed_state = Dense(hidden_size)
-        self.embed_action = Dense(hidden_size)
+        self.embed_return = Dense(hidden_size, name='embed_return')
+        self.embed_state = Dense(hidden_size, name='embed_state')
+        self.embed_action = Dense(hidden_size, name='embed_action')
 
         # Double normalization?
         self.embed_ln = LayerNormalization()
@@ -136,9 +136,9 @@ class DecisionTransformer(TrajectoryModel):
         self.GPT2_stack = GPT2Stack(**cfg)
 
         # note: we don't predict states or returns for the paper
-        self.predict_state = Dense(self.state_dim)
-        self.predict_action = Dense(self.act_dim, activation='tanh' if action_tanh else '') 
-        self.predict_return = Dense(1)
+        self.predict_state = Dense(self.state_dim, name='predict_state')
+        self.predict_action = Dense(self.act_dim, activation='tanh' if action_tanh else '', name='predict_action') 
+        self.predict_return = Dense(1, name='predict_return')
 
 
     
@@ -188,11 +188,15 @@ class DecisionTransformer(TrajectoryModel):
             stacked_inputs,
             # attention_mask=stacked_attention_mask,
         )
-        x = transformer_outputs['last_hidden_state']
+        x = transformer_outputs #['last_hidden_state']
 
         # reshape x so that the second dimension corresponds to the original
         # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
-        x = tf.transpose(x.reshape(batch_size, seq_length, 3, self.hidden_size), perm=(0, 2, 1, 3))
+        # x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
+        x = tf.transpose(
+                tf.reshape(x, (batch_size, seq_length, 3, self.hidden_size))
+            , perm=(0, 2, 1, 3)
+            )
 
         # get predictions
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
