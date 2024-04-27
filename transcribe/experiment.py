@@ -1,6 +1,6 @@
 import gym
 import numpy as np
-import torch
+import tensorflow as tf
 import wandb
 
 import argparse
@@ -10,7 +10,7 @@ import sys
 
 from decision_transformer.evaluation.evaluate_episodes import evaluate_episode, evaluate_episode_rtg
 from decision_transformer.models.decision_transformer import DecisionTransformer
-from decision_transformer.models.mlp_bc import MLPBCModel
+from decision_transformer.models.mlp_bc_model import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
 
@@ -22,6 +22,13 @@ def discount_cumsum(x, gamma):
         discount_cumsum[t] = x[t] + gamma * discount_cumsum[t+1]
     return discount_cumsum
 
+class WarmupLR(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, initial_learning_rate, warmup_steps, *args, **kwargs):
+        self.initial_learning_rate = initial_learning_rate
+        self.warmup_steps = warmup_steps
+
+    def __call__(self, step):
+        return tf.minimum((step+1)/self.warmup_steps, 1)
 
 def experiment(
         exp_prefix,
@@ -69,11 +76,12 @@ def experiment(
     dataset_path = f'data/{env_name}-{dataset}-v2.pkl'
     with open(dataset_path, 'rb') as f:
         trajectories = pickle.load(f)
-
+    print(f'trajectories len {len(trajectories)}')
     # save all path information into separate lists
     mode = variant.get('mode', 'normal')
     states, traj_lens, returns = [], [], []
     for path in trajectories:
+        # print(len(path['observations']))
         if mode == 'delayed':  # delayed: all rewards moved to end of trajectory
             path['rewards'][-1] = path['rewards'].sum()
             path['rewards'][:-1] = 0.
@@ -84,6 +92,8 @@ def experiment(
 
     # used for input normalization
     states = np.concatenate(states, axis=0)
+    print(f'states.shape {states.shape}')
+    print(f'returns.shape {returns.shape}')
     state_mean, state_std = np.mean(states, axis=0), np.std(states, axis=0) + 1e-6
 
     num_timesteps = sum(traj_lens)
@@ -102,43 +112,63 @@ def experiment(
 
     # only train on top pct_traj trajectories (for %BC experiment)
     num_timesteps = max(int(pct_traj*num_timesteps), 1)
-    sorted_inds = np.argsort(returns)  # lowest to highest
+    sorted_return_inds = np.argsort(returns)  # lowest to highest
     num_trajectories = 1
-    timesteps = traj_lens[sorted_inds[-1]]
+    timesteps = traj_lens[sorted_return_inds[-1]]
     ind = len(trajectories) - 2
-    while ind >= 0 and timesteps + traj_lens[sorted_inds[ind]] <= num_timesteps:
-        timesteps += traj_lens[sorted_inds[ind]]
+    while ind >= 0 and timesteps + traj_lens[sorted_return_inds[ind]] <= num_timesteps:
+        timesteps += traj_lens[sorted_return_inds[ind]]
         num_trajectories += 1
         ind -= 1
-    sorted_inds = sorted_inds[-num_trajectories:]
+    # clip the index list down to just the selected ons
+    sorted_return_inds = sorted_return_inds[-num_trajectories:]
+    print(sorted_return_inds)
+    print(returns[sorted_return_inds])
+    print(traj_lens[sorted_return_inds])
 
-    # used to reweight sampling so we sample according to timesteps instead of trajectories
-    p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
+    # used to reweight sampling so we sample according to trajectory length
+    p_sample = traj_lens[sorted_return_inds] / sum(traj_lens[sorted_return_inds])
 
     def get_batch(batch_size=256, max_len=K):
+        """
+        Generates a batch of data from the loaded offline data. 
+
+        Creates 'batch_size' sequences of length 'max_len'.
+
+        Returns a tuple of (state, action, reward, done, return to go, timesteps, mask)
+        
+        
+        """
+        print(f'get_batch({batch_size}, {max_len})')
+        # this selects batch_size indices from all trajectories, weighted by trajectory length
         batch_inds = np.random.choice(
             np.arange(num_trajectories),
             size=batch_size,
             replace=True,
-            p=p_sample,  # reweights so we sample according to timesteps
+            p=p_sample,  # reweights so we sample according to length
         )
 
         s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
+        #for each sequence in the batch
         for i in range(batch_size):
-            traj = trajectories[int(sorted_inds[batch_inds[i]])]
-            si = random.randint(0, traj['rewards'].shape[0] - 1)
+            traj = trajectories[int(sorted_return_inds[batch_inds[i]])]
+            
+            start_idx = random.randint(0, traj['rewards'].shape[0] - 1)
+
+            # print(traj['observations'][start_idx:start_idx + max_len].shape)
+            # print(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape)
 
             # get sequences from dataset
-            s.append(traj['observations'][si:si + max_len].reshape(1, -1, state_dim))
-            a.append(traj['actions'][si:si + max_len].reshape(1, -1, act_dim))
-            r.append(traj['rewards'][si:si + max_len].reshape(1, -1, 1))
+            s.append(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim))
+            a.append(traj['actions'][start_idx:start_idx + max_len].reshape(1, -1, act_dim))
+            r.append(traj['rewards'][start_idx:start_idx + max_len].reshape(1, -1, 1))
             if 'terminals' in traj:
-                d.append(traj['terminals'][si:si + max_len].reshape(1, -1))
+                d.append(traj['terminals'][start_idx:start_idx + max_len].reshape(1, -1))
             else:
-                d.append(traj['dones'][si:si + max_len].reshape(1, -1))
-            timesteps.append(np.arange(si, si + s[-1].shape[1]).reshape(1, -1))
+                d.append(traj['dones'][start_idx:start_idx + max_len].reshape(1, -1))
+            timesteps.append(np.arange(start_idx, start_idx + s[-1].shape[1]).reshape(1, -1))
             timesteps[-1][timesteps[-1] >= max_ep_len] = max_ep_len-1  # padding cutoff
-            rtg.append(discount_cumsum(traj['rewards'][si:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
+            rtg.append(discount_cumsum(traj['rewards'][start_idx:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
             if rtg[-1].shape[1] <= s[-1].shape[1]:
                 rtg[-1] = np.concatenate([rtg[-1], np.zeros((1, 1, 1))], axis=1)
 
@@ -153,48 +183,50 @@ def experiment(
             timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)), timesteps[-1]], axis=1)
             mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
 
-        s = torch.from_numpy(np.concatenate(s, axis=0)).to(dtype=torch.float32, device=device)
-        a = torch.from_numpy(np.concatenate(a, axis=0)).to(dtype=torch.float32, device=device)
-        r = torch.from_numpy(np.concatenate(r, axis=0)).to(dtype=torch.float32, device=device)
-        d = torch.from_numpy(np.concatenate(d, axis=0)).to(dtype=torch.long, device=device)
-        rtg = torch.from_numpy(np.concatenate(rtg, axis=0)).to(dtype=torch.float32, device=device)
-        timesteps = torch.from_numpy(np.concatenate(timesteps, axis=0)).to(dtype=torch.long, device=device)
-        mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
+        s = tf.convert_to_tensor(np.concatenate(s, axis=0),dtype=tf.float32)
+        print(s.shape)
+        a = tf.convert_to_tensor(np.concatenate(a, axis=0),dtype=tf.float32)
+        r = tf.convert_to_tensor(np.concatenate(r, axis=0),dtype=tf.float32)
+        d = tf.convert_to_tensor(np.concatenate(d, axis=0),dtype=tf.int32)
+        rtg = tf.convert_to_tensor(np.concatenate(rtg, axis=0),dtype=tf.float32)
+        timesteps = tf.convert_to_tensor(np.concatenate(timesteps, axis=0),dtype=tf.float32)
+        mask = tf.convert_to_tensor(np.concatenate(mask, axis=0),dtype=tf.int32)
 
+        print(f'mask.shape {mask.shape}')
         return s, a, r, d, rtg, timesteps, mask
 
     def eval_episodes(target_rew):
         def fn(model):
             returns, lengths = [], []
             for _ in range(num_eval_episodes):
-                with torch.no_grad():
-                    if model_type == 'dt':
-                        ret, length = evaluate_episode_rtg(
-                            env,
-                            state_dim,
-                            act_dim,
-                            model,
-                            max_ep_len=max_ep_len,
-                            scale=scale,
-                            target_return=target_rew/scale,
-                            mode=mode,
-                            state_mean=state_mean,
-                            state_std=state_std,
-                            device=device,
-                        )
-                    else:
-                        ret, length = evaluate_episode(
-                            env,
-                            state_dim,
-                            act_dim,
-                            model,
-                            max_ep_len=max_ep_len,
-                            target_return=target_rew/scale,
-                            mode=mode,
-                            state_mean=state_mean,
-                            state_std=state_std,
-                            device=device,
-                        )
+                #NOTE: with torch.no_grad():
+                if model_type == 'dt':
+                    ret, length = evaluate_episode_rtg(
+                        env,
+                        state_dim,
+                        act_dim,
+                        model,
+                        max_ep_len=max_ep_len,
+                        scale=scale,
+                        target_return=target_rew/scale,
+                        mode=mode,
+                        state_mean=state_mean,
+                        state_std=state_std,
+                        device=device,
+                    )
+                else:
+                    ret, length = evaluate_episode(
+                        env,
+                        state_dim,
+                        act_dim,
+                        model,
+                        max_ep_len=max_ep_len,
+                        target_return=target_rew/scale,
+                        mode=mode,
+                        state_mean=state_mean,
+                        state_std=state_std,
+                        device=device,
+                    )
                 returns.append(ret)
                 lengths.append(length)
             return {
@@ -231,20 +263,23 @@ def experiment(
     else:
         raise NotImplementedError
 
-    print(model)
-    model = model.to(device=device)
+    # model = model.to(device=device)
 
-    warmup_steps = variant['warmup_steps']
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=variant['learning_rate'],
+    # warmup_steps = variant['warmup_steps']
+
+    # model.build(input_shape=(None,20,11))
+    # model.summary()
+
+    scheduler = WarmupLR(
+        variant['learning_rate'],
+        variant['warmup_steps']
+    )
+    optimizer = tf.keras.optimizers.AdamW(
+        learning_rate=scheduler,
         weight_decay=variant['weight_decay'],
+        clipnorm=.25
     )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lambda steps: min((steps+1)/warmup_steps, 1)
-    )
-
+    
     if model_type == 'dt':
         trainer = SequenceTrainer(
             model=model,
@@ -252,7 +287,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: tf.reduce_mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':
@@ -262,7 +297,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: tf.reduce_mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
 

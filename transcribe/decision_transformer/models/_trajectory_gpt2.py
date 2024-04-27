@@ -20,8 +20,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import torch
-import torch.nn as nn
-from torch.nn import CrossEntropyLoss, MSELoss
+from torch import nn
 
 from transformers.activations import ACT2FN
 from transformers.file_utils import (
@@ -536,38 +535,38 @@ class GPT2Model(GPT2PreTrainedModel):
             num_layers -= 1
         self.use_layers = num_layers
 
-    @add_start_docstrings(PARALLELIZE_DOCSTRING)
-    def parallelize(self, device_map=None):
-        # Check validity of device_map
-        self.device_map = (
-            get_device_map(len(self.h), range(torch.cuda.device_count())) if device_map is None else device_map
-        )
-        assert_device_map(self.device_map, len(self.h))
-        self.model_parallel = True
-        self.first_device = "cpu" if "cpu" in self.device_map.keys() else "cuda:" + str(min(self.device_map.keys()))
-        self.last_device = "cuda:" + str(max(self.device_map.keys()))
-        self.wte = self.wte.to(self.first_device)
-        self.wpe = self.wpe.to(self.first_device)
-        # Load onto devices
-        for k, v in self.device_map.items():
-            for block in v:
-                cuda_device = "cuda:" + str(k)
-                self.h[block] = self.h[block].to(cuda_device)
-        # ln_f to last
-        self.ln_f = self.ln_f.to(self.last_device)
+    # @add_start_docstrings(PARALLELIZE_DOCSTRING)
+    # def parallelize(self, device_map=None):
+    #     # Check validity of device_map
+    #     self.device_map = (
+    #         get_device_map(len(self.h), range(torch.cuda.device_count())) if device_map is None else device_map
+    #     )
+    #     assert_device_map(self.device_map, len(self.h))
+    #     self.model_parallel = True
+    #     self.first_device = "cpu" if "cpu" in self.device_map.keys() else "cuda:" + str(min(self.device_map.keys()))
+    #     self.last_device = "cuda:" + str(max(self.device_map.keys()))
+    #     self.wte = self.wte.to(self.first_device)
+    #     self.wpe = self.wpe.to(self.first_device)
+    #     # Load onto devices
+    #     for k, v in self.device_map.items():
+    #         for block in v:
+    #             cuda_device = "cuda:" + str(k)
+    #             self.h[block] = self.h[block].to(cuda_device)
+    #     # ln_f to last
+    #     self.ln_f = self.ln_f.to(self.last_device)
 
-    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
-    def deparallelize(self):
-        self.model_parallel = False
-        self.device_map = None
-        self.first_device = "cpu"
-        self.last_device = "cpu"
-        self.wte = self.wte.to("cpu")
-        self.wpe = self.wpe.to("cpu")
-        for index in range(len(self.h)):
-            self.h[index] = self.h[index].to("cpu")
-        self.ln_f = self.ln_f.to("cpu")
-        torch.cuda.empty_cache()
+    # @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
+    # def deparallelize(self):
+    #     self.model_parallel = False
+    #     self.device_map = None
+    #     self.first_device = "cpu"
+    #     self.last_device = "cpu"
+    #     self.wte = self.wte.to("cpu")
+    #     self.wpe = self.wpe.to("cpu")
+    #     for index in range(len(self.h)):
+    #         self.h[index] = self.h[index].to("cpu")
+    #     self.ln_f = self.ln_f.to("cpu")
+    #     torch.cuda.empty_cache()
 
     def get_input_embeddings(self):
         return self.wte
