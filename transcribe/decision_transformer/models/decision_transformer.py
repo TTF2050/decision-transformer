@@ -26,8 +26,8 @@ class GPT2MLP(tf.keras.layers.Layer):
     def __init__(self, n_embed, n_state):
         super().__init__()
         print(f'GPT2MLP.__init__({n_embed}, {n_state})')
-        self.conv1 = Conv1D(n_state, n_embed, data_format="channels_first", activation='gelu')
-        self.conv2 = Conv1D(n_embed, n_state)
+        self.conv1 = Conv1D(n_state, 1, data_format="channels_first", activation='gelu')
+        self.conv2 = Conv1D(n_embed, 1)
 
     def call(self, x):
         print(f'GPT2MLP.call()')
