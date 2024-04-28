@@ -90,7 +90,7 @@ def evaluate_episode_rtg(
     # we keep all the histories on the device
     # note that the latest action and reward will be "padding"
     # states = torch.from_numpy(state).reshape(1, state_dim).to(device=device, dtype=torch.float32)
-    states = tf.convert_to_tensor(state)
+    states = [tf.convert_to_tensor(state)]
     # actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
     actions = []
     # rewards = torch.zeros(0, device=device, dtype=torch.float32)
@@ -100,41 +100,41 @@ def evaluate_episode_rtg(
     # target_return = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
     target_return = ep_return
     # timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
-    timesteps = 0
+    timesteps = []
     sim_states = []
 
     episode_return, episode_length = 0, 0
     for t in range(max_ep_len):
 
-        # add padding
-        actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)
-        rewards = torch.cat([rewards, torch.zeros(1, device=device)])
+        # add placeholders for action and reward
+        # actions = tf.concat([actions, tf.zeros((1, act_dim))], axis=0)
+        actions.append(tf.zeros((1, act_dim)))
+        # rewards = tf.concat([rewards, tf.zeros((1))])
+        rewards.append(tf.zeros((1)))
 
         action = model.get_action(
-            (states.to(dtype=torch.float32) - state_mean) / state_std,
-            actions.to(dtype=torch.float32),
-            rewards.to(dtype=torch.float32),
-            target_return.to(dtype=torch.float32),
-            timesteps.to(dtype=torch.long),
+            (states - state_mean) / state_std,
+            actions,
+            rewards,
+            target_return,
+            timesteps,
         )
         actions[-1] = action
-        action = action.detach().cpu().numpy()
+        # action = action.detach().cpu().numpy()
 
         state, reward, done, _ = env.step(action)
 
-        cur_state = torch.from_numpy(state).to(device=device).reshape(1, state_dim)
-        states = torch.cat([states, cur_state], dim=0)
+        # cur_state = torch.from_numpy(state).to(device=device).reshape(1, state_dim)
+        # states = tf.concat([states, cur_state], axis=0)
+        states.append(state)
         rewards[-1] = reward
 
         if mode != 'delayed':
             pred_return = target_return[0,-1] - (reward/scale)
         else:
             pred_return = target_return[0,-1]
-        target_return = torch.cat(
-            [target_return, pred_return.reshape(1, 1)], dim=1)
-        timesteps = torch.cat(
-            [timesteps,
-             torch.ones((1, 1), device=device, dtype=torch.long) * (t+1)], dim=1)
+        target_return = tf.concat( [target_return, pred_return], axis=1)
+        timesteps = tf.concat( [timesteps, tf.ones((1, 1)) * (t+1)], axis=1)
 
         episode_return += reward
         episode_length += 1

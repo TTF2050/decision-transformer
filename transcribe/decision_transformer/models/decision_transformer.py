@@ -1,13 +1,12 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Dense, LayerNormalization, Embedding, Conv1D, Add
+from tensorflow.keras.layers import Dense, LayerNormalization, Embedding, Conv1D, Add, Masking
 
 import transformers
 
 
 from decision_transformer.models.trajejctory_model import TrajectoryModel
-from decision_transformer.models.transformer import GlobalSelfAttention
 
 
 class SkipConnectWrapper(tf.keras.layers.Layer):
@@ -44,11 +43,11 @@ class GPT2Block(tf.keras.layers.Layer):
         super().__init__()
 
         self.layer_norm_1 = LayerNormalization()
-        self.self_attention = GlobalSelfAttention(
+        self.mha = tf.keras.layers.MultiHeadAttention(
             num_heads=num_heads,
             key_dim=d_model,
             dropout=dropout_rate)
-        # skip1 = SkipConnectWrapper(Sequential([layer_norm_1, self_attention]))
+        # skip1 = SkipConnectWrapper(Sequential([layer_norm_1, mha]))
 
         self.layer_norm_2 = LayerNormalization()
         self.mlp = GPT2MLP(d_model, dff)
@@ -60,7 +59,11 @@ class GPT2Block(tf.keras.layers.Layer):
 
     def call(self, x):
         # print(f'GPT2Block.call()')
-        y = self.self_attention(self.layer_norm_1(x))
+        x_norm = self.layer_norm_1(x)
+        y = self.mha(query=x_norm,
+            value=x_norm,
+            key=x_norm,
+            use_causal_mask = True)
         x = x+y
         y = self.mlp(self.layer_norm_2(x))
         return x+y
@@ -123,7 +126,8 @@ class DecisionTransformer(TrajectoryModel):
 
         
         # Embedding accepts inputs of a max of 
-        self.embed_timestep = Embedding(max_ep_len, hidden_size)
+        self.mask_generator = Masking(-1)
+        self.embed_timestep = Embedding(max_ep_len, hidden_size, mask_zero=True)
         self.embed_return = Dense(hidden_size, name='embed_return')
         self.embed_state = Dense(hidden_size, name='embed_state')
         self.embed_action = Dense(hidden_size, name='embed_action')
@@ -140,17 +144,25 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_action = Dense(self.act_dim, activation='tanh' if action_tanh else '', name='predict_action') 
         self.predict_return = Dense(1, name='predict_return')
 
-
+    # def call(self, x):
+        
     
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
 
         batch_size, seq_length = states.shape[0], states.shape[1]
 
         # embed each modality with a different head
+        mask = self.mask_generator(timesteps)
+
+        time_embeddings = self.embed_timestep(timesteps)
+
         state_embeddings = self.embed_state(states)
         action_embeddings = self.embed_action(actions)
         returns_embeddings = self.embed_return(returns_to_go)
-        time_embeddings = self.embed_timestep(timesteps)
+
+        print(state_embeddings.shape)
+        print(returns_embeddings.shape)
+        
 
         # time embeddings are treated similar to positional embeddings
         state_embeddings = state_embeddings + time_embeddings
@@ -207,19 +219,24 @@ class DecisionTransformer(TrajectoryModel):
 
     def get_action(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
         # we don't care about the past rewards in this model
+        
 
-        states = states.reshape(1, -1, self.state_dim)
-        actions = actions.reshape(1, -1, self.act_dim)
-        returns_to_go = returns_to_go.reshape(1, -1, 1)
-        timesteps = timesteps.reshape(1, -1)
+        # states = states.reshape(1, -1, self.state_dim)
+        # actions = actions.reshape(1, -1, self.act_dim)
+        # returns_to_go = returns_to_go.reshape(1, -1, 1)
+        # timesteps = timesteps.reshape(1, -1)
 
         if self.max_length is not None:
+            # clip overly long sequences down to max length (counting backward from tail)
+            print(self.max_length)
+            print(f'actions.shape {actions.shape}')
+            
             states = states[:,-self.max_length:]
             actions = actions[:,-self.max_length:]
             returns_to_go = returns_to_go[:,-self.max_length:]
             timesteps = timesteps[:,-self.max_length:]
 
-            # pad all tokens to sequence length
+            # pad all tokens to sequence length (left padded)
             attention_mask = torch.cat([torch.zeros(self.max_length-states.shape[1]), torch.ones(states.shape[1])])
             attention_mask = attention_mask.to(dtype=torch.long, device=states.device).reshape(1, -1)
             states = torch.cat(

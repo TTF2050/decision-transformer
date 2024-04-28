@@ -11,16 +11,21 @@ class SequenceTrainer(Trainer):
         # action_target = torch.clone(actions)
         with tf.GradientTape() as tape:
             state_preds, action_preds, reward_preds = self.model.forward(
-                states, actions, rewards, rtg[:,:-1], timesteps, attention_mask=attention_mask,
+                states, actions, rewards, rtg, timesteps, attention_mask=attention_mask,
             )
 
             act_dim = action_preds.shape[2]
-            action_preds = tf.reshape(action_preds, (-1, act_dim))[tf.reshape(attention_mask, (-1)) > 0]
-            actions = tf.reshape(actions, (-1, act_dim))[tf.reshape(attention_mask,(-1)) > 0]
+            # action_preds = tf.reshape(action_preds, (-1, act_dim))[tf.reshape(attention_mask, (-1)) > 0]
+            # actions = tf.reshape(actions, (-1, act_dim))[tf.reshape(attention_mask,(-1)) > 0]
+
+            # print(f'action_preds.shape {action_preds.shape}')
+            
+            # print(f'attention_mask.shape {attention_mask.shape}')
 
             loss = self.loss_fn(
                 None, action_preds, None,
                 None, actions, None,
+                np.expand_dims(attention_mask, axis=-1)
             )
 
             # self.optimizer.zero_grad()

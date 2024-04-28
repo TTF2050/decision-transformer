@@ -52,6 +52,10 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_return = torch.nn.Linear(hidden_size, 1)
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
+        
+        print(f'forward() returns_to_go.shape {returns_to_go.shape}')
+
+        assert False
 
         batch_size, seq_length = states.shape[0], states.shape[1]
 
