@@ -76,26 +76,31 @@ def evaluate_episode_rtg(
         mode='normal',
     ):
 
-    model.eval()
-    model.to(device=device)
+    # model.eval()
+    # model.to(device=device)
 
-    state_mean = torch.from_numpy(state_mean).to(device=device)
-    state_std = torch.from_numpy(state_std).to(device=device)
+    # state_mean = torch.from_numpy(state_mean).to(device=device)
+    # state_std = torch.from_numpy(state_std).to(device=device)
 
     state = env.reset()
     if mode == 'noise':
         state = state + np.random.normal(0, 0.1, size=state.shape)
 
+    print(type(state))
     # we keep all the histories on the device
     # note that the latest action and reward will be "padding"
-    states = torch.from_numpy(state).reshape(1, state_dim).to(device=device, dtype=torch.float32)
-    actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
-    rewards = torch.zeros(0, device=device, dtype=torch.float32)
+    # states = torch.from_numpy(state).reshape(1, state_dim).to(device=device, dtype=torch.float32)
+    states = tf.convert_to_tensor(state)
+    # actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
+    actions = []
+    # rewards = torch.zeros(0, device=device, dtype=torch.float32)
+    rewards = []
 
     ep_return = target_return
-    target_return = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
-    timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
-
+    # target_return = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
+    target_return = ep_return
+    # timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
+    timesteps = 0
     sim_states = []
 
     episode_return, episode_length = 0, 0

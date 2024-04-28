@@ -150,14 +150,15 @@ def experiment(
 
         s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
         #for each sequence in the batch
+        
         for i in range(batch_size):
             traj = trajectories[int(sorted_return_inds[batch_inds[i]])]
-            
+            print(f'observations.shape {traj["observations"].shape}')
             start_idx = random.randint(0, traj['rewards'].shape[0] - 1)
 
-            # print(traj['observations'][start_idx:start_idx + max_len].shape)
+            print(f"state slice from random start index {start_idx}: {traj['observations'][start_idx:start_idx + max_len].shape}")
             # print(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape)
-
+            print(f"state slice after reshape {traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape}")
             # get sequences from dataset
             s.append(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim))
             a.append(traj['actions'][start_idx:start_idx + max_len].reshape(1, -1, act_dim))
@@ -168,20 +169,26 @@ def experiment(
                 d.append(traj['dones'][start_idx:start_idx + max_len].reshape(1, -1))
             timesteps.append(np.arange(start_idx, start_idx + s[-1].shape[1]).reshape(1, -1))
             timesteps[-1][timesteps[-1] >= max_ep_len] = max_ep_len-1  # padding cutoff
+            # discounted cumulative sum computer over all remaining steps, then clipped down to batch_len+1
             rtg.append(discount_cumsum(traj['rewards'][start_idx:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
+            # if there are fewer rtg elements than desired, add the extra element as 0
             if rtg[-1].shape[1] <= s[-1].shape[1]:
                 rtg[-1] = np.concatenate([rtg[-1], np.zeros((1, 1, 1))], axis=1)
 
             # padding and state + reward normalization
             tlen = s[-1].shape[1]
-            s[-1] = np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)
+            print(f'starting concat section with max_len {max_len}')
+            # print(f'{np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)}')
+            s[-1] =   np.concatenate([np.zeros((1, max_len - tlen, state_dim)),      s[-1]], axis=1)
             s[-1] = (s[-1] - state_mean) / state_std
-            a[-1] = np.concatenate([np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
-            r[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), r[-1]], axis=1)
-            d[-1] = np.concatenate([np.ones((1, max_len - tlen)) * 2, d[-1]], axis=1)
-            rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), rtg[-1]], axis=1) / scale
-            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)), timesteps[-1]], axis=1)
+            a[-1] =   np.concatenate([ np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
+            r[-1] =   np.concatenate([np.zeros((1, max_len - tlen, 1)),              r[-1]], axis=1)
+            d[-1] =   np.concatenate([ np.ones((1, max_len - tlen)) * 2,             d[-1]], axis=1)
+            rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)),            rtg[-1]], axis=1) / scale
+            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)),   timesteps[-1]], axis=1)
             mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
+            print(f'{s[-1].shape}')
+            print(f'{rtg[-1].shape}')
 
         s = tf.convert_to_tensor(np.concatenate(s, axis=0),dtype=tf.float32)
         print(s.shape)
@@ -190,9 +197,11 @@ def experiment(
         d = tf.convert_to_tensor(np.concatenate(d, axis=0),dtype=tf.int32)
         rtg = tf.convert_to_tensor(np.concatenate(rtg, axis=0),dtype=tf.float32)
         timesteps = tf.convert_to_tensor(np.concatenate(timesteps, axis=0),dtype=tf.float32)
+        # ones -> valid data
         mask = tf.convert_to_tensor(np.concatenate(mask, axis=0),dtype=tf.int32)
 
         print(f'mask.shape {mask.shape}')
+        print(mask)
         return s, a, r, d, rtg, timesteps, mask
 
     def eval_episodes(target_rew):
