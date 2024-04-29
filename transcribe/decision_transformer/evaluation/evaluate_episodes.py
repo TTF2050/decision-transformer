@@ -76,6 +76,60 @@ def evaluate_episode_rtg(
         mode='normal',
     ):
 
+    s = np.zeros((1,max_ep_len,state_dim))
+    a = np.zeros((1,max_ep_len,act_dim))
+    r = np.zeros((1,max_ep_len))
+    d = np.zeros((1,max_ep_len))
+    target_returns = np.zeros((1,max_ep_len))
+    mask = np.zeros((1,max_ep_len))
+    timesteps = np.ones((1,max_ep_len))*-1
+
+    state = env.reset()
+    if mode == 'noise':
+        state = state + np.random.normal(0, 0.1, size=state.shape)
+    s[0,0,:] = state
+    target_returns[0,0] = target_return
+    
+    # print(f'target_returns {target_returns}')
+
+    episode_return, episode_length = 0, 0
+    for t in range(max_ep_len-1):
+        timesteps[0,t] = t
+        mask[0,t] = 1
+        
+        action = model.get_action(
+            (s - state_mean) / state_std,
+            a,
+            r,
+            np.expand_dims(target_returns,axis=-1),
+            timesteps,
+            mask
+        )
+
+        a[0,t,:] = action
+        # action = action.detach().cpu().numpy()
+
+        state, reward, done, _ = env.step(action)
+
+        s[0,t+1,:] = state
+
+        if mode != 'delayed':
+            pred_return = target_returns[0,t] - (reward/scale)
+        else:
+            pred_return = target_returns[0,t]
+        target_returns[0, t+1] = pred_return
+
+        episode_return += reward
+        episode_length += 1
+
+        if done:
+            break
+
+    return episode_return, episode_length
+
+
+
+
     # model.eval()
     # model.to(device=device)
 
