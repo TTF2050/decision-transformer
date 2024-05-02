@@ -144,14 +144,28 @@ def experiment(
 
             # padding and state + reward normalization
             tlen = s[-1].shape[1]
+            # state is 0 padded and normalized
             s[-1] = np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)
             s[-1] = (s[-1] - state_mean) / state_std
+            # action is -10 padded
             a[-1] = np.concatenate([np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
+            # reward is 0 padded
             r[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), r[-1]], axis=1)
+            # done is 2 padded
             d[-1] = np.concatenate([np.ones((1, max_len - tlen)) * 2, d[-1]], axis=1)
+            # rtg is zero padded
             rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), rtg[-1]], axis=1) / scale
+            # timesteps is 0 paded
             timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)), timesteps[-1]], axis=1)
+            # mask is 0 padded (1 is valid)
             mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
+
+            # if tlen < max_len:
+                # print(f'short run {tlen}')
+                # print(f'{s[-1]}')
+                # print(f'{a[-1]}')
+                # print(f'{r[-1]}')
+                # print(f'{d[-1]}')
 
         s = torch.from_numpy(np.concatenate(s, axis=0)).to(dtype=torch.float32, device=device)
         a = torch.from_numpy(np.concatenate(a, axis=0)).to(dtype=torch.float32, device=device)
@@ -160,6 +174,8 @@ def experiment(
         rtg = torch.from_numpy(np.concatenate(rtg, axis=0)).to(dtype=torch.float32, device=device)
         timesteps = torch.from_numpy(np.concatenate(timesteps, axis=0)).to(dtype=torch.long, device=device)
         mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
+
+        # print(f'rtg.shape {rtg.shape}')
 
         return s, a, r, d, rtg, timesteps, mask
 
@@ -252,7 +268,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat[1:] - a[:-1])**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':

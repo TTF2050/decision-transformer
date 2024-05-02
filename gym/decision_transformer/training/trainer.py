@@ -37,7 +37,9 @@ class Trainer:
         eval_start = time.time()
 
         self.model.eval()
+        print(f'calling 2 eval functions')
         for eval_fn in self.eval_fns:
+            print('calling eval fn')
             outputs = eval_fn(self.model)
             for k, v in outputs.items():
                 logs[f'evaluation/{k}'] = v

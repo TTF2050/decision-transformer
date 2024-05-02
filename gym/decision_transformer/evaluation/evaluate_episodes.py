@@ -75,7 +75,7 @@ def evaluate_episode_rtg(
         target_return=None,
         mode='normal',
     ):
-
+    # print('evaluate_episode_rtg()')
     model.eval()
     model.to(device=device)
 
@@ -100,6 +100,7 @@ def evaluate_episode_rtg(
 
     episode_return, episode_length = 0, 0
     for t in range(max_ep_len):
+        # print(f'evaluate step {t} in {range(max_ep_len)}')
 
         # add padding
         actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)

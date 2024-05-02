@@ -79,7 +79,7 @@ def experiment(
     print(f'trajectories len {len(trajectories)}')
     # save all path information into separate lists
     mode = variant.get('mode', 'normal')
-    states, traj_lens, returns = [], [], []
+    states, traj_lens, traj_total_return = [], [], []
     for path in trajectories:
         # print(len(path['observations']))
         if mode == 'delayed':  # delayed: all rewards moved to end of trajectory
@@ -87,13 +87,17 @@ def experiment(
             path['rewards'][:-1] = 0.
         states.append(path['observations'])
         traj_lens.append(len(path['observations']))
-        returns.append(path['rewards'].sum())
-    traj_lens, returns = np.array(traj_lens), np.array(returns)
+        traj_total_return.append(path['rewards'].sum())
+        # reshape data for later...
+        if 'terminals' in path:
+            path['dones'] = path['terminals']
+        path['rtg'] = discount_cumsum(path['rewards'], gamma=1.)
+    traj_lens, traj_total_return = np.array(traj_lens), np.array(traj_total_return)
 
     # used for input normalization
     states = np.concatenate(states, axis=0)
     print(f'states.shape {states.shape}')
-    print(f'returns.shape {returns.shape}')
+    print(f'returns.shape {traj_total_return.shape}')
     state_mean, state_std = np.mean(states, axis=0), np.std(states, axis=0) + 1e-6
 
     num_timesteps = sum(traj_lens)
@@ -101,8 +105,8 @@ def experiment(
     print('=' * 50)
     print(f'Starting new experiment: {env_name} {dataset}')
     print(f'{len(traj_lens)} trajectories, {num_timesteps} timesteps found')
-    print(f'Average return: {np.mean(returns):.2f}, std: {np.std(returns):.2f}')
-    print(f'Max return: {np.max(returns):.2f}, min: {np.min(returns):.2f}')
+    print(f'Average return: {np.mean(traj_total_return):.2f}, std: {np.std(traj_total_return):.2f}')
+    print(f'Max return: {np.max(traj_total_return):.2f}, min: {np.min(traj_total_return):.2f}')
     print('=' * 50)
 
     K = variant['K']
@@ -112,7 +116,7 @@ def experiment(
 
     # only train on top pct_traj trajectories (for %BC experiment)
     num_timesteps = max(int(pct_traj*num_timesteps), 1)
-    sorted_return_inds = np.argsort(returns)  # lowest to highest
+    sorted_return_inds = np.argsort(traj_total_return)  # lowest to highest
     num_trajectories = 1
     timesteps = traj_lens[sorted_return_inds[-1]]
     ind = len(trajectories) - 2
@@ -123,13 +127,14 @@ def experiment(
     # clip the index list down to just the selected ons
     sorted_return_inds = sorted_return_inds[-num_trajectories:]
     print(sorted_return_inds)
-    print(returns[sorted_return_inds])
+    print(traj_total_return[sorted_return_inds])
     print(traj_lens[sorted_return_inds])
 
     # used to reweight sampling so we sample according to trajectory length
     p_sample = traj_lens[sorted_return_inds] / sum(traj_lens[sorted_return_inds])
 
     def get_batch(batch_size=256, max_len=K):
+        # should really do this the easy way... tfds.load('d4rl_mujoco_hopper/v2-medium')
         """
         Generates a batch of data from the loaded offline data. 
 
@@ -139,25 +144,87 @@ def experiment(
         
         
         """
-        print(f'get_batch({batch_size}, {max_len})')
+        # print(f'get_batch({batch_size}, {max_len}) from {num_trajectories} trajectories')
         # this selects batch_size indices from all trajectories, weighted by trajectory length
-        batch_inds = np.random.choice(
+        batch_source_indices = np.random.choice(
             np.arange(num_trajectories),
             size=batch_size,
             replace=True,
             p=p_sample,  # reweights so we sample according to length
         )
 
-        s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
+        # s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
+        
+        # precompute some useful data
+        batch_sources = [trajectories[sorted_return_inds[int(idx)]] for idx in batch_source_indices]
+        # print(len(batch_sources))
+        batch_lens = [traj['rewards'].shape[0] for traj in batch_sources]
+        # print(len(batch_lens))
+
+        start_indices = [random.randint(0, batch_len - 1) for batch_len in batch_lens]
+        # print(len(start_indices))
+        end_indices = list(map(lambda x,y: min(x+max_len, y), start_indices, batch_lens))
+        # print(len(end_indices))
+        seq_lens = [end_idx-start_idx for start_idx, end_idx in zip(start_indices, end_indices)]
+        # print(len(seq_lens))
+        # compute the required outputs (variable length at this stage)
+        timesteps = [np.arange(start_idx, end_idx) for start_idx, end_idx in zip(start_indices, end_indices)]
+
+        s = np.zeros((batch_size,max_len,state_dim))
+        a = np.ones((batch_size,max_len,act_dim))*-10
+        r = np.zeros((batch_size,max_len))
+        d = np.ones((batch_size,max_len))*2
+        rtg = np.zeros((batch_size,max_len))
+        mask = np.zeros((batch_size,max_len))
+
+        for i, params in enumerate(zip(batch_sources, timesteps, seq_lens)):
+            traj, t_steps, seq_len = params
+            s[i,-seq_len:,:] = traj['observations'][t_steps]
+            a[i,-seq_len:,:] = traj['actions'][t_steps]
+            r[i,-seq_len:] = traj['rewards'][t_steps]
+            d[i,-seq_len:] = traj['dones'][t_steps]
+            rtg[i,-seq_len:] = traj['rtg'][t_steps]
+            mask[i,-seq_len:] = np.ones((seq_len,))
+
+        s -= state_mean
+        s /= state_std
+        
+        r = np.expand_dims(r, axis=-1)
+        d = np.expand_dims(d, axis=-1)
+        rtg = np.expand_dims(rtg, axis=-1)
+        # print(f'rtg.shape {rtg.shape}')
+        
+        # s = [traj['observations'][t_steps] + [np.zeros((max_len-seq_len,*state_dim))] for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
+        # a = [traj['actions'][t_steps] + [np.zeros_like(act_dim)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
+        # r = [traj['rewards'][t_steps] + [np.zeros_like(1)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
+        # # this works because 'terminals' was previously remapped to 'dones' (if necessary)
+        # d = [traj['dones'][t_steps] + [np.zeros_like(1)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
+        # # TODO: pretty sure that this is correct, and the weird +1 element in the original 
+        # # implementation isnt actually used anywhere
+        # rtg = [traj['rtg'][t_steps] + [np.zeros_like(1)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
+        
+        # pad out the data structures to max_len
+        # only timesteps is explicitly padded in such a way as to encode mask data
+        timesteps = tf.keras.utils.pad_sequences(timesteps,max_len,value=0,padding='pre')
+        # s = s + [np.zeros_like(state_dim)]*(max_len-seq_len)
+        # a = a + [np.zeros_like(act_dim)]*(max_len-seq_len)
+        # r = r + [np.zeros_like(1)]*(max_len-seq_len)
+        # d = d + [np.zeros_like(1)]*(max_len-seq_len)
+        # rtg = rtg + [np.zeros_like(1)]*(max_len-seq_len)
+
+        return s, a, r, d, rtg, timesteps, mask
+        
+
         #for each sequence in the batch
         for i in range(batch_size):
-            traj = trajectories[int(sorted_return_inds[batch_inds[i]])]
-            
+            # yay for multi-level indexing....
+            traj = trajectories[int(sorted_return_inds[batch_source_indices[i]])]
+            print(f'observations.shape {traj["observations"].shape}')
             start_idx = random.randint(0, traj['rewards'].shape[0] - 1)
 
-            # print(traj['observations'][start_idx:start_idx + max_len].shape)
+            print(f"state slice from random start index {start_idx}: {traj['observations'][start_idx:start_idx + max_len].shape}")
             # print(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape)
-
+            print(f"state slice after reshape {traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape}")
             # get sequences from dataset
             s.append(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim))
             a.append(traj['actions'][start_idx:start_idx + max_len].reshape(1, -1, act_dim))
@@ -168,20 +235,28 @@ def experiment(
                 d.append(traj['dones'][start_idx:start_idx + max_len].reshape(1, -1))
             timesteps.append(np.arange(start_idx, start_idx + s[-1].shape[1]).reshape(1, -1))
             timesteps[-1][timesteps[-1] >= max_ep_len] = max_ep_len-1  # padding cutoff
+            # discounted cumulative sum computer over all remaining steps, then clipped down to batch_len+1
             rtg.append(discount_cumsum(traj['rewards'][start_idx:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
+            # if there are fewer rtg elements than desired, add the extra element as 0
             if rtg[-1].shape[1] <= s[-1].shape[1]:
                 rtg[-1] = np.concatenate([rtg[-1], np.zeros((1, 1, 1))], axis=1)
 
             # padding and state + reward normalization
+            # gotta love the magic numbers....
             tlen = s[-1].shape[1]
-            s[-1] = np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)
+            print(f'starting concat section with max_len {max_len}')
+            # print(f'{np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)}')
+            s[-1] =   np.concatenate([np.zeros((1, max_len - tlen, state_dim)),      s[-1]], axis=1)
             s[-1] = (s[-1] - state_mean) / state_std
-            a[-1] = np.concatenate([np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
-            r[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), r[-1]], axis=1)
-            d[-1] = np.concatenate([np.ones((1, max_len - tlen)) * 2, d[-1]], axis=1)
-            rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), rtg[-1]], axis=1) / scale
-            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)), timesteps[-1]], axis=1)
+            a[-1] =   np.concatenate([ np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
+            r[-1] =   np.concatenate([np.zeros((1, max_len - tlen, 1)),              r[-1]], axis=1)
+            d[-1] =   np.concatenate([ np.ones((1, max_len - tlen)) * 2,             d[-1]], axis=1)
+            rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)),            rtg[-1]], axis=1) / scale
+            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)),   timesteps[-1]], axis=1)
             mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
+            
+            print(f'{s[-1].shape}')
+            print(f'{rtg[-1].shape}')
 
         s = tf.convert_to_tensor(np.concatenate(s, axis=0),dtype=tf.float32)
         print(s.shape)
@@ -190,9 +265,11 @@ def experiment(
         d = tf.convert_to_tensor(np.concatenate(d, axis=0),dtype=tf.int32)
         rtg = tf.convert_to_tensor(np.concatenate(rtg, axis=0),dtype=tf.float32)
         timesteps = tf.convert_to_tensor(np.concatenate(timesteps, axis=0),dtype=tf.float32)
+        # ones -> valid data
         mask = tf.convert_to_tensor(np.concatenate(mask, axis=0),dtype=tf.int32)
 
         print(f'mask.shape {mask.shape}')
+        print(mask)
         return s, a, r, d, rtg, timesteps, mask
 
     def eval_episodes(target_rew):
@@ -287,7 +364,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: tf.reduce_mean((a_hat - a)**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r, mask: tf.reduce_mean(((a_hat - a)**2)*mask),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':
@@ -315,7 +392,25 @@ def experiment(
         if log_to_wandb:
             wandb.log(outputs)
 
-
+def configureGPUs(gpu_id=None, mem_limit=None):
+    """Sets memory limits on one or all GPUs"""
+    #get list of all GPUs in the system
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    #if no specific GPU is specified, iterate over all GPUs
+    if gpu_id is None:
+        for gpu in gpus:
+            #tf.config.experimental.set_visible_devices(gpu, 'GPU')
+            tf.config.experimental.set_memory_growth(gpu, True)
+            if mem_limit is not None:
+                tf.config.experimental.set_virtual_device_configuration(gpu,
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+    else:
+        tf.config.experimental.set_visible_devices(gpus[gpu_id], 'GPU')
+        tf.config.experimental.set_memory_growth(gpus[gpu_id], True)
+        if mem_limit is not None:
+            tf.config.experimental.set_virtual_device_configuration(gpus[gpu_id],
+                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+            
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='hopper')
@@ -338,7 +433,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_steps_per_iter', type=int, default=10000)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--log_to_wandb', '-w', type=bool, default=False)
+    parser.add_argument('--mem_limit', type=int, default=1024)
     
     args = parser.parse_args()
+
+    configureGPUs(mem_limit=args.mem_limit)
 
     experiment('gym-experiment', variant=vars(args))
