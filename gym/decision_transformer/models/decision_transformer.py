@@ -32,7 +32,7 @@ class DecisionTransformer(TrajectoryModel):
             n_embd=hidden_size,
             **kwargs
         )
-
+        print(config)
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
         self.transformer = GPT2Model(config)
@@ -53,9 +53,8 @@ class DecisionTransformer(TrajectoryModel):
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
         
-        print(f'forward() returns_to_go.shape {returns_to_go.shape}')
-
-        assert False
+        # print(f'forward() returns_to_go.shape {returns_to_go.shape}')
+        # print(f'forward() action: {actions}')
 
         batch_size, seq_length = states.shape[0], states.shape[1]
 
@@ -91,11 +90,14 @@ class DecisionTransformer(TrajectoryModel):
             inputs_embeds=stacked_inputs,
             attention_mask=stacked_attention_mask,
         )
+        
         x = transformer_outputs['last_hidden_state']
-
+        
         # reshape x so that the second dimension corresponds to the original
         # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
         x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
+
+        print(x.shape)
 
         # get predictions
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
@@ -137,7 +139,7 @@ class DecisionTransformer(TrajectoryModel):
             ).to(dtype=torch.long)
         else:
             attention_mask = None
-
+        # print(f'get_action() input actions {actions.shape}')
         _, action_preds, return_preds = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
 

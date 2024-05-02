@@ -13,10 +13,11 @@ class ActTrainer(Trainer):
         state_preds, action_preds, reward_preds = self.model.forward(
             states, actions, rewards, attention_mask=attention_mask, target_return=rtg[:,0],
         )
-
+        print(action_target.shape)
         act_dim = action_preds.shape[2]
         action_preds = action_preds.reshape(-1, act_dim)
         action_target = action_target[:,-1].reshape(-1, act_dim)
+        print(action_target.shape)
 
         loss = self.loss_fn(
             state_preds, action_preds, reward_preds,

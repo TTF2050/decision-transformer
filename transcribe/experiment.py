@@ -144,7 +144,7 @@ def experiment(
         
         
         """
-        print(f'get_batch({batch_size}, {max_len}) from {num_trajectories} trajectories')
+        # print(f'get_batch({batch_size}, {max_len}) from {num_trajectories} trajectories')
         # this selects batch_size indices from all trajectories, weighted by trajectory length
         batch_source_indices = np.random.choice(
             np.arange(num_trajectories),
@@ -171,25 +171,28 @@ def experiment(
         timesteps = [np.arange(start_idx, end_idx) for start_idx, end_idx in zip(start_indices, end_indices)]
 
         s = np.zeros((batch_size,max_len,state_dim))
-        a = np.zeros((batch_size,max_len,act_dim))
+        a = np.ones((batch_size,max_len,act_dim))*-10
         r = np.zeros((batch_size,max_len))
-        d = np.zeros((batch_size,max_len))
+        d = np.ones((batch_size,max_len))*2
         rtg = np.zeros((batch_size,max_len))
         mask = np.zeros((batch_size,max_len))
 
         for i, params in enumerate(zip(batch_sources, timesteps, seq_lens)):
             traj, t_steps, seq_len = params
-            s[i,:seq_len,:] = traj['observations'][t_steps]
-            a[i,:seq_len,:] = traj['actions'][t_steps]
-            r[i,:seq_len] = traj['rewards'][t_steps]
-            d[i,:seq_len] = traj['dones'][t_steps]
-            rtg[i,:seq_len] = traj['rtg'][t_steps]
-            mask[i,:seq_len] = np.ones((seq_len,))
+            s[i,-seq_len:,:] = traj['observations'][t_steps]
+            a[i,-seq_len:,:] = traj['actions'][t_steps]
+            r[i,-seq_len:] = traj['rewards'][t_steps]
+            d[i,-seq_len:] = traj['dones'][t_steps]
+            rtg[i,-seq_len:] = traj['rtg'][t_steps]
+            mask[i,-seq_len:] = np.ones((seq_len,))
 
+        s -= state_mean
+        s /= state_std
+        
         r = np.expand_dims(r, axis=-1)
         d = np.expand_dims(d, axis=-1)
         rtg = np.expand_dims(rtg, axis=-1)
-        print(f'rtg.shape {rtg.shape}')
+        # print(f'rtg.shape {rtg.shape}')
         
         # s = [traj['observations'][t_steps] + [np.zeros((max_len-seq_len,*state_dim))] for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
         # a = [traj['actions'][t_steps] + [np.zeros_like(act_dim)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
@@ -202,7 +205,7 @@ def experiment(
         
         # pad out the data structures to max_len
         # only timesteps is explicitly padded in such a way as to encode mask data
-        timesteps = tf.keras.utils.pad_sequences(timesteps,max_len,value=-1)
+        timesteps = tf.keras.utils.pad_sequences(timesteps,max_len,value=0,padding='pre')
         # s = s + [np.zeros_like(state_dim)]*(max_len-seq_len)
         # a = a + [np.zeros_like(act_dim)]*(max_len-seq_len)
         # r = r + [np.zeros_like(1)]*(max_len-seq_len)
@@ -389,7 +392,25 @@ def experiment(
         if log_to_wandb:
             wandb.log(outputs)
 
-
+def configureGPUs(gpu_id=None, mem_limit=None):
+    """Sets memory limits on one or all GPUs"""
+    #get list of all GPUs in the system
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    #if no specific GPU is specified, iterate over all GPUs
+    if gpu_id is None:
+        for gpu in gpus:
+            #tf.config.experimental.set_visible_devices(gpu, 'GPU')
+            tf.config.experimental.set_memory_growth(gpu, True)
+            if mem_limit is not None:
+                tf.config.experimental.set_virtual_device_configuration(gpu,
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+    else:
+        tf.config.experimental.set_visible_devices(gpus[gpu_id], 'GPU')
+        tf.config.experimental.set_memory_growth(gpus[gpu_id], True)
+        if mem_limit is not None:
+            tf.config.experimental.set_virtual_device_configuration(gpus[gpu_id],
+                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+            
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='hopper')
@@ -412,7 +433,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_steps_per_iter', type=int, default=10000)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--log_to_wandb', '-w', type=bool, default=False)
+    parser.add_argument('--mem_limit', type=int, default=1024)
     
     args = parser.parse_args()
+
+    configureGPUs(mem_limit=args.mem_limit)
 
     experiment('gym-experiment', variant=vars(args))

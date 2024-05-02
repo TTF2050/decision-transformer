@@ -33,7 +33,7 @@ class SequenceTrainer(Trainer):
             # torch.nn.utils.clip_grad_norm_(self.model.parameters(), .25)
             # self.optimizer.step()
 
-            gradients = tape.gradient(loss, self.model.trainable_variables)
+            gradients = tape.gradient(loss, self.model.trainable_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         # with torch.no_grad():
