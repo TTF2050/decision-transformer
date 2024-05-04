@@ -2,6 +2,10 @@
 
 #WARNING! starts everything in parallel
 
+cd dectransform/
+source .env/bin/activate
+cd decision-transformer/gym
+
 ./grid_scripts/gridsearch_batch_size_32.sh &
 ./grid_scripts/gridsearch_batch_size_128.sh &
 ./grid_scripts/gridsearch_embed_dim_64.sh &

@@ -14,7 +14,7 @@ cd ../..
 #build image
 singularity build dectransform.simg docker://ttf2050/dectransform:0.0.1
 #start image
-singularity run --nv --bind dectransform:${HOME}/dectransform dectransform.simg
+singularity run --bind dectransform:${HOME}/dectransform dectransform.simg
 #put the env configuration script in the right place
 cd dectransform
 cp decision-transformer/bootstrap_env.sh .
@@ -22,6 +22,10 @@ cp decision-transformer/bootstrap_env.sh .
 source .env/bin/activate
 cd decision-transformer/gym/data
 python download_d4rl_datasets.py
+
+#prime the grid launcher
+cd ~
+cp dectransform/decision-transformer/gym/run_grid.sh .
 # exit image shell ctrl+d
 
 
@@ -31,4 +35,4 @@ singularity run --nv --bind dectransform:${HOME}/dectransform dectransform.simg
 cd dectransform/
 source .env/bin/activate
 cd decision-transformer/gym
-./run.sh
+./run_grid.sh
