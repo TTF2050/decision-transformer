@@ -1,7 +1,7 @@
-#for reference only
+## for reference only
 exit 1
 
-#on host/login node
+## initial setup on host/login node
 cd ~
 mkdir dectransform
 cd dectransform
@@ -25,7 +25,7 @@ python download_d4rl_datasets.py
 # exit image shell ctrl+d
 
 
-# do stuff
+## do stuff
 interact -q gpu -g 2
 singularity run --nv --bind dectransform:${HOME}/dectransform dectransform.simg
 cd dectransform/
