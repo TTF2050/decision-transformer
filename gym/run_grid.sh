@@ -15,3 +15,6 @@
 ./grid_scripts/gridsearch_prime.sh &
 ./grid_scripts/gridsearch_seq_len_10.sh &
 ./grid_scripts/gridsearch_seq_len_30.sh &
+
+#camp out here until everything returns
+wait
