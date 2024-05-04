@@ -19,6 +19,9 @@ singularity run --nv --bind dectransform:${HOME}/dectransform dectransform.simg
 cd dectransform
 cp decision-transformer/bootstrap_env.sh .
 ./bootstrap_env.sh
+source .env/bin/activate
+cd decision-transformer/gym/data
+python download_d4rl_datasets.py
 # exit image shell ctrl+d
 
 
