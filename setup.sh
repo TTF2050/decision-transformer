@@ -26,6 +26,7 @@ python download_d4rl_datasets.py
 #prime the grid launcher
 cd ~
 cp dectransform/decision-transformer/gym/run_grid.sh .
+cp dectransform/decision-transformer/gym/oscar_job.sh .
 # exit image shell ctrl+d
 
 
