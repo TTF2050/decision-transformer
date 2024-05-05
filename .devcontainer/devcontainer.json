@@ -21,15 +21,18 @@
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {"ghcr.io/devcontainers/features/nvidia-cuda": {}},
 
-	"runArgs": [ "--gpus", "1", "--ipc=host", "--shm-size=32000000000" ],
+	"runArgs": [ "--gpus", "all", "--ipc=host", "--shm-size=32000000000" ],
 
-	"mounts": [ "source=nfs_rl_data,target=/nfs-rl-data"]
+	"mounts": [ "source=nfs_rl_data,target=/nfs-rl-data"],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
 	// Uncomment the next line to run commands after the container is created.
-	// "postCreateCommand": "cat /etc/os-release",
+	"postCreateCommand": "cp ./dectransform/bootstrap_env.sh ~ && cd ~ && ./bootstrap_env.sh",
+
+	"workspaceMount": "source=${localWorkspaceFolder},target=/home/user/dectransform,type=bind,consistency=cached",
+	"workspaceFolder": "/home/user"
 
 	// Configure tool-specific properties.
 	// "customizations": {},

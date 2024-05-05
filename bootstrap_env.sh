@@ -5,7 +5,7 @@ python -m venv .env
 source .env/bin/activate
 pip install gymnasium torch "tensorflow==2.15" carla wandb "cython<3" mujoco \
      transformers atari-py opencv-python blosc dopamine-rl dopaminekit \
-     tensorflow-estimator  \
+     tensorflow-estimator matplotlib scikit-learn \
      ray[all]
 
 

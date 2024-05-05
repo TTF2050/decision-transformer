@@ -97,3 +97,10 @@ RUN unzip Atari-2600-VCS-ROM-Collection.zip -d Atari-2600-VCS-ROM-Collection || 
 
 # COPY entrypoint.sh /
 # ENTRYPOINT ["/entrypoint.sh"]
+
+
+
+RUN useradd -m -s /bin/bash user && \
+    echo user ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/user \
+    && chmod 0440 /etc/sudoers.d/user
+USER user
