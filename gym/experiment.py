@@ -176,6 +176,8 @@ def experiment(
         mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
 
         # print(f'rtg.shape {rtg.shape}')
+        print(f'get_batch() s.shape {s.shape} | a.shape {a.shape} | r.shape {r.shape} | d.shape {d.shape}')
+        print(f'get_batch() timesteps {timesteps}')
 
         return s, a, r, d, rtg, timesteps, mask
 
@@ -268,7 +270,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat[1:] - a[:-1])**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':
@@ -296,7 +298,7 @@ def experiment(
         if log_to_wandb:
             wandb.log(outputs)
 
-
+            
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='hopper')

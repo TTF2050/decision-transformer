@@ -1,8 +1,8 @@
 export PYTHONUNBUFFERED="true"
 
-python experiment.py --env hopper --dataset medium  | tee "hopper-medium.log"
+python experiment.py --env hopper --dataset medium --max_iters 1 --num_steps_per_iter 1 --num_eval_episodes 1  | tee "hopper-medium.log"
 
-# --max_iters 1 --num_steps_per_iter 1 --num_eval_episodes 1 
+# 
 
 exit
 

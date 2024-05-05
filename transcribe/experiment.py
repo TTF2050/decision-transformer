@@ -169,22 +169,24 @@ def experiment(
         # print(len(seq_lens))
         # compute the required outputs (variable length at this stage)
         timesteps = [np.arange(start_idx, end_idx) for start_idx, end_idx in zip(start_indices, end_indices)]
-
-        s = np.zeros((batch_size,max_len,state_dim))
-        a = np.ones((batch_size,max_len,act_dim))*-10
-        r = np.zeros((batch_size,max_len))
-        d = np.ones((batch_size,max_len))*2
-        rtg = np.zeros((batch_size,max_len))
-        mask = np.zeros((batch_size,max_len))
-
+        print(f'prealloc memory')
+        s = np.zeros((batch_size,max_len,state_dim),dtype=np.float32)
+        a = np.ones((batch_size,max_len,act_dim),dtype=np.float32)*-10
+        r = np.zeros((batch_size,max_len),dtype=np.float32)
+        d = np.ones((batch_size,max_len),dtype=np.float32)*2
+        rtg = np.zeros((batch_size,max_len),dtype=np.float32)
+        mask = np.zeros((batch_size,max_len),dtype=np.bool_)
+        print('loop over trajectories')
         for i, params in enumerate(zip(batch_sources, timesteps, seq_lens)):
             traj, t_steps, seq_len = params
+            if seq_len != max_len:
+                print(' >> short trajectory ')
             s[i,-seq_len:,:] = traj['observations'][t_steps]
             a[i,-seq_len:,:] = traj['actions'][t_steps]
             r[i,-seq_len:] = traj['rewards'][t_steps]
             d[i,-seq_len:] = traj['dones'][t_steps]
             rtg[i,-seq_len:] = traj['rtg'][t_steps]
-            mask[i,-seq_len:] = np.ones((seq_len,))
+            mask[i,-seq_len:] = np.ones((seq_len,),dtype=np.bool_)
 
         s -= state_mean
         s /= state_std
@@ -193,6 +195,7 @@ def experiment(
         d = np.expand_dims(d, axis=-1)
         rtg = np.expand_dims(rtg, axis=-1)
         # print(f'rtg.shape {rtg.shape}')
+
         
         # s = [traj['observations'][t_steps] + [np.zeros((max_len-seq_len,*state_dim))] for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
         # a = [traj['actions'][t_steps] + [np.zeros_like(act_dim)]*(max_len-seq_len) for traj, t_steps, seq_len in zip(batch_sources, timesteps, seq_lens)]
@@ -205,72 +208,25 @@ def experiment(
         
         # pad out the data structures to max_len
         # only timesteps is explicitly padded in such a way as to encode mask data
-        timesteps = tf.keras.utils.pad_sequences(timesteps,max_len,value=0,padding='pre')
+        timesteps = tf.keras.utils.pad_sequences(timesteps,max_len,value=-1,padding='pre')
+        # 0 is now the mask value, and timesteps are effecitively 1-indexed
+        timesteps +=1
         # s = s + [np.zeros_like(state_dim)]*(max_len-seq_len)
         # a = a + [np.zeros_like(act_dim)]*(max_len-seq_len)
         # r = r + [np.zeros_like(1)]*(max_len-seq_len)
         # d = d + [np.zeros_like(1)]*(max_len-seq_len)
         # rtg = rtg + [np.zeros_like(1)]*(max_len-seq_len)
 
+        print(f'get_batch() s.shape {s.shape} | a.shape {a.shape} | r.shape {r.shape} | d.shape {d.shape}')
+        print(f'get_batch() timesteps {timesteps}')
+
+        print(f'batch mask dtype is {mask.dtype}')
+        print(f'actions dtype  is {a.dtype}')
+
         return s, a, r, d, rtg, timesteps, mask
         
 
-        #for each sequence in the batch
-        for i in range(batch_size):
-            # yay for multi-level indexing....
-            traj = trajectories[int(sorted_return_inds[batch_source_indices[i]])]
-            print(f'observations.shape {traj["observations"].shape}')
-            start_idx = random.randint(0, traj['rewards'].shape[0] - 1)
-
-            print(f"state slice from random start index {start_idx}: {traj['observations'][start_idx:start_idx + max_len].shape}")
-            # print(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape)
-            print(f"state slice after reshape {traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim).shape}")
-            # get sequences from dataset
-            s.append(traj['observations'][start_idx:start_idx + max_len].reshape(1, -1, state_dim))
-            a.append(traj['actions'][start_idx:start_idx + max_len].reshape(1, -1, act_dim))
-            r.append(traj['rewards'][start_idx:start_idx + max_len].reshape(1, -1, 1))
-            if 'terminals' in traj:
-                d.append(traj['terminals'][start_idx:start_idx + max_len].reshape(1, -1))
-            else:
-                d.append(traj['dones'][start_idx:start_idx + max_len].reshape(1, -1))
-            timesteps.append(np.arange(start_idx, start_idx + s[-1].shape[1]).reshape(1, -1))
-            timesteps[-1][timesteps[-1] >= max_ep_len] = max_ep_len-1  # padding cutoff
-            # discounted cumulative sum computer over all remaining steps, then clipped down to batch_len+1
-            rtg.append(discount_cumsum(traj['rewards'][start_idx:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
-            # if there are fewer rtg elements than desired, add the extra element as 0
-            if rtg[-1].shape[1] <= s[-1].shape[1]:
-                rtg[-1] = np.concatenate([rtg[-1], np.zeros((1, 1, 1))], axis=1)
-
-            # padding and state + reward normalization
-            # gotta love the magic numbers....
-            tlen = s[-1].shape[1]
-            print(f'starting concat section with max_len {max_len}')
-            # print(f'{np.concatenate([np.zeros((1, max_len - tlen, state_dim)), s[-1]], axis=1)}')
-            s[-1] =   np.concatenate([np.zeros((1, max_len - tlen, state_dim)),      s[-1]], axis=1)
-            s[-1] = (s[-1] - state_mean) / state_std
-            a[-1] =   np.concatenate([ np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
-            r[-1] =   np.concatenate([np.zeros((1, max_len - tlen, 1)),              r[-1]], axis=1)
-            d[-1] =   np.concatenate([ np.ones((1, max_len - tlen)) * 2,             d[-1]], axis=1)
-            rtg[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)),            rtg[-1]], axis=1) / scale
-            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)),   timesteps[-1]], axis=1)
-            mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
-            
-            print(f'{s[-1].shape}')
-            print(f'{rtg[-1].shape}')
-
-        s = tf.convert_to_tensor(np.concatenate(s, axis=0),dtype=tf.float32)
-        print(s.shape)
-        a = tf.convert_to_tensor(np.concatenate(a, axis=0),dtype=tf.float32)
-        r = tf.convert_to_tensor(np.concatenate(r, axis=0),dtype=tf.float32)
-        d = tf.convert_to_tensor(np.concatenate(d, axis=0),dtype=tf.int32)
-        rtg = tf.convert_to_tensor(np.concatenate(rtg, axis=0),dtype=tf.float32)
-        timesteps = tf.convert_to_tensor(np.concatenate(timesteps, axis=0),dtype=tf.float32)
-        # ones -> valid data
-        mask = tf.convert_to_tensor(np.concatenate(mask, axis=0),dtype=tf.int32)
-
-        print(f'mask.shape {mask.shape}')
-        print(mask)
-        return s, a, r, d, rtg, timesteps, mask
+        
 
     def eval_episodes(target_rew):
         def fn(model):
@@ -347,6 +303,7 @@ def experiment(
     # model.build(input_shape=(None,20,11))
     # model.summary()
 
+    #TODO valaidate
     scheduler = WarmupLR(
         variant['learning_rate'],
         variant['warmup_steps']
@@ -354,8 +311,15 @@ def experiment(
     optimizer = tf.keras.optimizers.AdamW(
         learning_rate=scheduler,
         weight_decay=variant['weight_decay'],
-        clipnorm=.25
+        global_clipnorm=.25
     )
+
+    @tf.function
+    def loss_fn(s_hat, a_hat, r_hat, s, a, r, mask=None):
+        if mask is not None:
+            mask =tf.cast(mask, dtype=tf.float32)
+            return tf.reduce_mean(((a_hat - a)**2)*mask)
+        return tf.reduce_mean((a_hat - a)**2)
     
     if model_type == 'dt':
         trainer = SequenceTrainer(
@@ -364,7 +328,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r, mask: tf.reduce_mean(((a_hat - a)**2)*mask),
+            loss_fn=loss_fn,
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':

@@ -60,66 +60,69 @@ GPT2_PRETRAINED_MODEL_ARCHIVE_LIST = [
 ]
 
 
-# def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
-#     """Load tf checkpoints in a pytorch model"""
-#     try:
-#         import re
+def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
+    """Load tf checkpoints in a pytorch model"""
+    try:
+        import re
 
-#         import tensorflow as tf
-#     except ImportError:
-#         logger.error(
-#             "Loading a TensorFlow model in PyTorch, requires TensorFlow to be installed. Please see "
-#             "https://www.tensorflow.org/install/ for installation instructions."
-#         )
-#         raise
-#     tf_path = os.path.abspath(gpt2_checkpoint_path)
-#     logger.info("Converting TensorFlow checkpoint from {}".format(tf_path))
-#     # Load weights from TF model
-#     init_vars = tf.train.list_variables(tf_path)
-#     names = []
-#     arrays = []
-#     for name, shape in init_vars:
-#         logger.info("Loading TF weight {} with shape {}".format(name, shape))
-#         array = tf.train.load_variable(tf_path, name)
-#         names.append(name)
-#         arrays.append(array.squeeze())
+        import tensorflow as tf
+    except ImportError:
+        logger.error(
+            "Loading a TensorFlow model in PyTorch, requires TensorFlow to be installed. Please see "
+            "https://www.tensorflow.org/install/ for installation instructions."
+        )
+        raise
+    tf_path = os.path.abspath(gpt2_checkpoint_path)
+    logger.info("Converting TensorFlow checkpoint from {}".format(tf_path))
+    # Load weights from TF model
+    init_vars = tf.train.list_variables(tf_path)
+    names = []
+    arrays = []
+    for name, shape in init_vars:
+        logger.info("Loading TF weight {} with shape {}".format(name, shape))
+        array = tf.train.load_variable(tf_path, name)
+        names.append(name)
+        arrays.append(array.squeeze())
 
-#     for name, array in zip(names, arrays):
-#         name = name[6:]  # skip "model/"
-#         name = name.split("/")
-#         pointer = model
-#         for m_name in name:
-#             if re.fullmatch(r"[A-Za-z]+\d+", m_name):
-#                 scope_names = re.split(r"(\d+)", m_name)
-#             else:
-#                 scope_names = [m_name]
-#             if scope_names[0] == "w" or scope_names[0] == "g":
-#                 pointer = getattr(pointer, "weight")
-#             elif scope_names[0] == "b":
-#                 pointer = getattr(pointer, "bias")
-#             elif scope_names[0] == "wpe" or scope_names[0] == "wte":
-#                 pointer = getattr(pointer, scope_names[0])
-#                 pointer = getattr(pointer, "weight")
-#             else:
-#                 pointer = getattr(pointer, scope_names[0])
-#             if len(scope_names) >= 2:
-#                 num = int(scope_names[1])
-#                 pointer = pointer[num]
-#         try:
-#             assert (
-#                     pointer.shape == array.shape
-#             ), f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
-#         except AssertionError as e:
-#             e.args += (pointer.shape, array.shape)
-#             raise
-#         logger.info("Initialize PyTorch weight {}".format(name))
-#         pointer.data = torch.from_numpy(array)
-#     return model
+    for name, array in zip(names, arrays):
+        name = name[6:]  # skip "model/"
+        name = name.split("/")
+        pointer = model
+        for m_name in name:
+            if re.fullmatch(r"[A-Za-z]+\d+", m_name):
+                scope_names = re.split(r"(\d+)", m_name)
+            else:
+                scope_names = [m_name]
+            if scope_names[0] == "w" or scope_names[0] == "g":
+                pointer = getattr(pointer, "weight")
+            elif scope_names[0] == "b":
+                pointer = getattr(pointer, "bias")
+            elif scope_names[0] == "wpe" or scope_names[0] == "wte":
+                pointer = getattr(pointer, scope_names[0])
+                pointer = getattr(pointer, "weight")
+            else:
+                pointer = getattr(pointer, scope_names[0])
+            if len(scope_names) >= 2:
+                num = int(scope_names[1])
+                pointer = pointer[num]
+        try:
+            assert (
+                    pointer.shape == array.shape
+            ), f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
+        except AssertionError as e:
+            e.args += (pointer.shape, array.shape)
+            raise
+        logger.info("Initialize PyTorch weight {}".format(name))
+        pointer.data = torch.from_numpy(array)
+    return model
 
 
 class Attention(nn.Module):
     def __init__(self, nx, n_positions, config, scale=False, is_cross_attention=False):
         super().__init__()
+
+
+        assert n_positions == 1024, "wrong position count"
 
         n_state = nx  # in Attention: n_state=768 (nx=n_embd)
         # [switch nx => n_state from Block to Attention to keep identical to TF implem]
@@ -133,6 +136,7 @@ class Attention(nn.Module):
         self.scale = scale
         self.is_cross_attention = is_cross_attention
         if self.is_cross_attention:
+            assert False, "Attention registerd as cross attention"
             self.c_attn = Conv1D(2 * n_state, nx)
             self.q_attn = Conv1D(n_state, nx)
         else:
@@ -167,18 +171,25 @@ class Attention(nn.Module):
 
         if not self.is_cross_attention:
             # if only "normal" attention layer implements causal mask
+            print(f'Attention.forward() applying causal mask?')
+            print(f'Attention.forward() bias.shape {self.bias.shape}')
             mask = self.bias[:, :, ns - nd: ns, :ns]
+            print(f'Attention.forward() mask.shape {mask.shape}')
             w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
+            print(f'Attention.forward() w.shape {w.shape}')
 
         if attention_mask is not None:
             # Apply the attention mask
+            print(f'Attention.forward() applying attention mask')
             w = w + attention_mask
 
         w = nn.Softmax(dim=-1)(w)
+        print(f'Attention.forward() attention dropout')
         w = self.attn_dropout(w)
 
         # Mask heads if we want to
         if head_mask is not None:
+            print(f'Attention.forward() applying head mask')
             w = w * head_mask
 
         outputs = [torch.matmul(w, v)]
@@ -218,6 +229,7 @@ class Attention(nn.Module):
             key, value = self.c_attn(encoder_hidden_states).split(self.split_size, dim=2)
             attention_mask = encoder_attention_mask
         else:
+            print(f'Attention.forward() conv1d c_attn -> query,key,value')
             query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
 
         query = self.split_heads(query)
@@ -237,7 +249,9 @@ class Attention(nn.Module):
         a = attn_outputs[0]
 
         a = self.merge_heads(a)
+        print(f'Attention.forward() conv1d c_proj')
         a = self.c_proj(a)
+        print(f'Attention.forward() residual dropout')
         a = self.resid_dropout(a)
 
         outputs = [a, present] + attn_outputs[1:]
@@ -254,8 +268,11 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, x):
+        print(f'MLP.forward act(conv1(x))')
         h = self.act(self.c_fc(x))
+        print(f'MLP.forward conv2(x)')
         h2 = self.c_proj(h)
+        print(f'MLP.forward dropout(x)')
         return self.dropout(h2)
 
 
@@ -284,6 +301,7 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         # self.adapter_ln = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         if config.add_cross_attention:
+            assert False, "adding cross attention in block?"
             self.crossattention = Attention(hidden_size, n_positions, config, scale, is_cross_attention=True)
             self.ln_cross_attn = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = MLP(inner_dim, config)
@@ -300,6 +318,7 @@ class Block(nn.Module):
             use_cache=False,
             output_attentions=False,
     ):
+        print(f'Block.forward attention(layernorm1(x))')
         attn_outputs = self.attn(
             self.ln_1(hidden_states),
             layer_past=layer_past,
@@ -311,9 +330,11 @@ class Block(nn.Module):
         attn_output = attn_outputs[0]  # output_attn: a, present, (attentions)
         outputs = attn_outputs[1:]
         # residual connection
+        print(f'Block.forward skip connection')
         hidden_states = attn_output + hidden_states
 
         if encoder_hidden_states is not None:
+            assert False, "using crossattention in block?"
             # add one self-attention block for cross-attention
             assert hasattr(
                 self, "crossattention"
@@ -330,9 +351,11 @@ class Block(nn.Module):
             # residual connection
             hidden_states = hidden_states + attn_output
             outputs = outputs + cross_attn_outputs[2:]  # add cross attentions if we output attention weights
-
+        
+        print(f'Block.forward mlp(layernorm2(x))')
         feed_forward_hidden_states = self.mlp(self.ln_2(hidden_states))
         # residual connection
+        print(f'Block.forward skip connection')
         hidden_states = hidden_states + feed_forward_hidden_states
         # hidden_states = hidden_states + self.adapter_ln(self.adapter_mlp(hidden_states))
 
@@ -358,6 +381,7 @@ class GPT2PreTrainedModel(PreTrainedModel):
         if isinstance(module, (nn.Linear, nn.Embedding, Conv1D)):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
+            print(" >> accessing initializer_range")
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if isinstance(module, (nn.Linear, Conv1D)) and module.bias is not None:
                 module.bias.data.zero_()
@@ -517,7 +541,7 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+        # self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         # self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([Block(config.n_positions, config, scale=True) for _ in range(config.n_layer)])
@@ -605,6 +629,7 @@ class GPT2Model(GPT2PreTrainedModel):
             output_hidden_states=None,
             return_dict=None,
     ):
+        assert not self.config.add_cross_attention, "is cross attention??"
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -676,14 +701,17 @@ class GPT2Model(GPT2PreTrainedModel):
         head_mask = self.get_head_mask(head_mask, self.config.n_layer)
 
         if inputs_embeds is None:
+            assert False, "using wte"
             inputs_embeds = self.wte(input_ids)
         # position_embeds = self.wpe(position_ids)
         hidden_states = inputs_embeds  # + position_embeds
 
         if token_type_ids is not None:
+            assert False, "using wte"
             token_type_embeds = self.wte(token_type_ids)
             hidden_states = hidden_states + token_type_embeds
 
+        print(f'GPT2Model.forward Dropout(input_embeds)')
         hidden_states = self.drop(hidden_states)
 
         output_shape = input_shape + (hidden_states.size(-1),)
@@ -693,7 +721,7 @@ class GPT2Model(GPT2PreTrainedModel):
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
-
+            print(f'GPT2Model.forward block layer {i}')
             if self.use_layers is not None and i >= self.use_layers:
                 break
 
@@ -756,6 +784,7 @@ class GPT2Model(GPT2PreTrainedModel):
                     if i == v[-1] and "cuda:" + str(k) != self.last_device:
                         hidden_states = hidden_states.to("cuda:" + str(k + 1))
 
+        print(f'GPT2Model.forward layer norm')
         hidden_states = self.ln_f(hidden_states)
 
         hidden_states = hidden_states.view(*output_shape)

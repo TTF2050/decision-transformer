@@ -61,7 +61,7 @@ def evaluate_episode(
 
     return episode_return, episode_length
 
-
+# @tf.function
 def evaluate_episode_rtg(
         env,
         state_dim,
@@ -76,119 +76,52 @@ def evaluate_episode_rtg(
         mode='normal',
     ):
 
-    s = np.zeros((1,max_ep_len,state_dim))
-    a = np.zeros((1,max_ep_len,act_dim))
-    r = np.zeros((1,max_ep_len))
-    d = np.zeros((1,max_ep_len))
-    target_returns = np.zeros((1,max_ep_len))
-    mask = np.zeros((1,max_ep_len))
-    timesteps = np.ones((1,max_ep_len))*-1
+    # placeholders
+    states = tf.zeros((0,state_dim))
+    actions = tf.zeros((0,act_dim))
+    rewards = tf.zeros(0)
+    target_returns = tf.ones(1)*target_return
+    timesteps = tf.ones(1) #1-indexed
 
-    state = env.reset()
+    state = tf.cast(env.reset(), dtype=tf.float32)
     if mode == 'noise':
-        state = state + np.random.normal(0, 0.1, size=state.shape)
-    s[0,0,:] = state
-    target_returns[0,0] = target_return
-    
-    # print(f'target_returns {target_returns}')
-
-    episode_return, episode_length = 0, 0
-    for t in range(max_ep_len-1):
-        timesteps[0,t] = t
-        mask[0,t] = 1
-        
-        action = model.get_action(
-            (s - state_mean) / state_std,
-            a,
-            r,
-            np.expand_dims(target_returns,axis=-1),
-            timesteps,
-            mask
-        )
-
-        a[0,t,:] = action
-        # action = action.detach().cpu().numpy()
-
-        state, reward, done, _ = env.step(action)
-
-        s[0,t+1,:] = state
-
-        if mode != 'delayed':
-            pred_return = target_returns[0,t] - (reward/scale)
-        else:
-            pred_return = target_returns[0,t]
-        target_returns[0, t+1] = pred_return
-
-        episode_return += reward
-        episode_length += 1
-
-        if done:
-            break
-
-    return episode_return, episode_length
-
-
-
-
-    # model.eval()
-    # model.to(device=device)
-
-    # state_mean = torch.from_numpy(state_mean).to(device=device)
-    # state_std = torch.from_numpy(state_std).to(device=device)
-
-    state = env.reset()
-    if mode == 'noise':
-        state = state + np.random.normal(0, 0.1, size=state.shape)
-
-    print(type(state))
-    # we keep all the histories on the device
-    # note that the latest action and reward will be "padding"
-    # states = torch.from_numpy(state).reshape(1, state_dim).to(device=device, dtype=torch.float32)
-    states = [tf.convert_to_tensor(state)]
-    # actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
-    actions = []
-    # rewards = torch.zeros(0, device=device, dtype=torch.float32)
-    rewards = []
-
-    ep_return = target_return
-    # target_return = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
-    target_return = ep_return
-    # timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
-    timesteps = []
-    sim_states = []
+        state = state + tf.random.normal(0, 0.1, size=state.shape)
+    states = tf.concat([states,tf.expand_dims(state,axis=0)], axis=0)
+    # states[0,:] = state
 
     episode_return, episode_length = 0, 0
     for t in range(max_ep_len):
-
-        # add placeholders for action and reward
-        # actions = tf.concat([actions, tf.zeros((1, act_dim))], axis=0)
-        actions.append(tf.zeros((1, act_dim)))
-        # rewards = tf.concat([rewards, tf.zeros((1))])
-        rewards.append(tf.zeros((1)))
-
+        
+        actions = tf.concat([actions, tf.zeros((1,act_dim))], axis=0)
+        rewards = tf.concat([rewards, tf.zeros(1)], axis=0)
+        
         action = model.get_action(
             (states - state_mean) / state_std,
             actions,
             rewards,
-            target_return,
+            target_returns,
             timesteps,
         )
-        actions[-1] = action
+
+        actions = tf.concat([actions[:-1],tf.expand_dims(action,axis=0)], axis=0)
+        # actions[-1,:] = action
         # action = action.detach().cpu().numpy()
 
-        state, reward, done, _ = env.step(action)
+        state, reward, done, _ = env.step(action.numpy())
+        print(f'evaluate_episode_rtg() states.shape {states.shape}')
+        print(f'evaluate_episode_rtg() state.shape {state.shape}')
 
-        # cur_state = torch.from_numpy(state).to(device=device).reshape(1, state_dim)
-        # states = tf.concat([states, cur_state], axis=0)
-        states.append(state)
-        rewards[-1] = reward
+        states = tf.concat([states, tf.expand_dims(tf.cast(state, dtype=tf.float32),axis=0)], axis=0)
+        rewards = tf.concat([rewards[:-1],tf.expand_dims(tf.cast(reward, dtype=tf.float32),axis=0)], axis=0)
+        # rewards[-1] = reward
 
         if mode != 'delayed':
-            pred_return = target_return[0,-1] - (reward/scale)
+            pred_return = target_returns[-1] - (reward/scale)
         else:
-            pred_return = target_return[0,-1]
-        target_return = tf.concat( [target_return, pred_return], axis=1)
-        timesteps = tf.concat( [timesteps, tf.ones((1, 1)) * (t+1)], axis=1)
+            pred_return = target_returns[-1]
+        target_returns = tf.concat([target_returns, tf.expand_dims(pred_return,axis=0)], axis=0)
+
+        timesteps = tf.concat([timesteps, tf.expand_dims(tf.cast(t+2,dtype=tf.float32),axis=0)], axis=0)
 
         episode_return += reward
         episode_length += 1
@@ -197,3 +130,4 @@ def evaluate_episode_rtg(
             break
 
     return episode_return, episode_length
+

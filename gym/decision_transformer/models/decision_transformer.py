@@ -57,8 +57,10 @@ class DecisionTransformer(TrajectoryModel):
         # print(f'forward() action: {actions}')
 
         batch_size, seq_length = states.shape[0], states.shape[1]
+        print(f'forward() batch_size: {batch_size} | seq_len {seq_length}')
 
         if attention_mask is None:
+            print('forward() received attention_mask=None')
             # attention mask for GPT: 1 if can be attended to, 0 if not
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long)
 
@@ -78,26 +80,27 @@ class DecisionTransformer(TrajectoryModel):
         stacked_inputs = torch.stack(
             (returns_embeddings, state_embeddings, action_embeddings), dim=1
         ).permute(0, 2, 1, 3).reshape(batch_size, 3*seq_length, self.hidden_size)
+        print(f'forward() stacked_inputs.shape {stacked_inputs.shape}')
         stacked_inputs = self.embed_ln(stacked_inputs)
 
         # to make the attention mask fit the stacked inputs, have to stack it as well
         stacked_attention_mask = torch.stack(
             (attention_mask, attention_mask, attention_mask), dim=1
         ).permute(0, 2, 1).reshape(batch_size, 3*seq_length)
+        print(f'forward() stacked_attention_mask.shape {stacked_attention_mask.shape}')
 
         # we feed in the input embeddings (not word indices as in NLP) to the model
         transformer_outputs = self.transformer(
             inputs_embeds=stacked_inputs,
             attention_mask=stacked_attention_mask,
         )
-        
+        print(f'forward() transformer_outputs["last_hidden_state"].shape {transformer_outputs["last_hidden_state"].shape}')
         x = transformer_outputs['last_hidden_state']
         
         # reshape x so that the second dimension corresponds to the original
         # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
         x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
-
-        print(x.shape)
+        print(f'forward() x.shape {x.shape}')
 
         # get predictions
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
@@ -119,6 +122,10 @@ class DecisionTransformer(TrajectoryModel):
             actions = actions[:,-self.max_length:]
             returns_to_go = returns_to_go[:,-self.max_length:]
             timesteps = timesteps[:,-self.max_length:]
+
+            assert timesteps.shape[0] == states.shape[0]
+            assert timesteps.shape[0] == actions.shape[0]
+            assert timesteps.shape[0] == returns_to_go.shape[0]
 
             # pad all tokens to sequence length
             attention_mask = torch.cat([torch.zeros(self.max_length-states.shape[1]), torch.ones(states.shape[1])])
