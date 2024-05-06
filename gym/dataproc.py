@@ -45,6 +45,15 @@ param_alts = {
     "learn_rate": ('2e-4', '5e-5')
 }
 
+pretty_names = {
+    "seq_len": "sequence length",
+    "layers": "layer count",
+    "heads": "head count",
+    "batch_size": "batch size",
+    "embed": "embedding dimension",
+    "learn_rate": "learning rate"
+}
+
 exp_tgt_returns = {
     'hopper': 3600,
     'halfcheetah': 12000,
@@ -211,8 +220,13 @@ def collect_data(base_path):
 def generate_results(all_data):
     # all_data[exp][dataset][batch][test_param]['values']
     # all_data[exp][dataset][batch][test_param]['metrics']
+    fig, axs = plt.subplots(2,3, dpi=600)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.92], h_pad=2)
+    num_els = 4
+    extra_iters = 2
+    fig.suptitle(f'Mean normalized reward after {num_els+1} training iterations')
     with open(f'{path.join(script_dir,results_dir)}/trained_stats.txt','w') as f:
-        for test_param in param_defaults.keys():
+        for test_param,ax in zip(param_defaults.keys(), fig.get_axes()):
             f.write(f'PARAMETER: {test_param}\n')
             # collect all exp rewards (normalized by target return) for a given test param value
             param_values = (param_defaults[test_param], *param_alts[test_param])
@@ -226,7 +240,7 @@ def generate_results(all_data):
                     for batch in batches:
                         data_set = all_data[exp]['expert'][batch][test_param][param_val]
                         # print(data_set)
-                        param_data[param_val] += list(map(lambda x: x[0]/x[1], zip(data_set['return_mean'][-5:],data_set['target_return'][-5:])))
+                        param_data[param_val] += list(map(lambda x: x[0]/x[1], zip(data_set['return_mean'][num_els:num_els+extra_iters],data_set['target_return'][num_els:num_els+extra_iters])))
             print(param_data)
             
             y = np.zeros(0)
@@ -237,20 +251,33 @@ def generate_results(all_data):
                 y_chunk = np.asarray(param_data[param_val])
                 y = np.concatenate([y, y_chunk])
                 x = np.concatenate([x, np.ones_like(y_chunk)*float(param_val)])
-                f.write(f'{param_val}    {np.mean(y_chunk)}    {np.std(y_chunk)}\n')
+                f.write(f'{param_val}    {np.mean(y_chunk):.2f}    {np.std(y_chunk):.2f}\n')
             print(x)
-            
-            plt.scatter(x,y)
-            plt.title('mean normalized reward after 5 training iterations')
-            plt.xlabel(f'{test_param}')
+
             ticks = list(map(float,param_values))
             ticks.sort()
+
+            ax.scatter(x,y)
+            ax.set_title(f'{pretty_names[test_param]}')
+            ax.set_xticks(ticks)
+            ax.ticklabel_format(style='sci',scilimits=(0,1000),axis='both')
+
+            ax.set_ylim(0,1.1)
+            
+            plt.figure('single_plot')
+            plt.scatter(x,y)
+            plt.title(f'Mean normalized reward after {num_els+1} training iterations')
+            plt.xlabel(f'{pretty_names[test_param]}')
             plt.xticks(ticks)
+            plt.ticklabel_format(style='sci',scilimits=(0,1000),axis='both')
             plt.ylabel('normalized episode returns')
             plt.ylim(0,1.1)
             plt.savefig(f'{path.join(script_dir,results_dir)}/trained_{test_param}.png')
             plt.clf()
         
+    fig.savefig(f'{path.join(script_dir,results_dir)}/trained_cluster.png')
+    plt.close(fig)
+
 
     def do_lin_reg(x, y_raw, y_norm):
         print(f'y_raw {y_raw}')
@@ -266,15 +293,19 @@ def generate_results(all_data):
         print(model.coef_)
         return np.squeeze(model.coef_)
 
+    fig, axs = plt.subplots(2,3, dpi=600)
+    fig.tight_layout(rect=[0, 0.02, 1, 0.92], h_pad=2)
+    num_els = 3
+    fig.suptitle(f'Mean normalized reward improvement rate (first {num_els} iterations)')
     with open(f'{path.join(script_dir,results_dir)}/converge_stats.txt','w') as f:
-        for test_param in param_defaults.keys():
+        for test_param,ax in zip(param_defaults.keys(), fig.get_axes()):
             f.write(f'PARAMETER: {test_param}\n')
             # collect all exp rewards (normalized by target return) for a given test param value
             param_values = (param_defaults[test_param], *param_alts[test_param])
             # print(test_param)
             # print(param_values)
             param_data = {}
-            num_els = 3
+            
             for param_val in param_values:
                 param_data[param_val] = []
                 for exp in experiments:
@@ -291,19 +322,34 @@ def generate_results(all_data):
                 y_chunk = np.asarray(param_data[param_val])
                 y = np.concatenate([y, y_chunk])
                 x = np.concatenate([x, np.ones_like(y_chunk)*float(param_val)])
-                f.write(f'{param_val}    {np.mean(y_chunk)}    {np.std(y_chunk)}\n')
+                f.write(f'{param_val}    {np.mean(y_chunk):.2f}    {np.std(y_chunk):.2f}\n')
             print(x)
-            
-            plt.scatter(x,y)
-            plt.title(f'mean return improvement rate (first {num_els} iterations)')
-            plt.xlabel(f'{test_param}')
+
             ticks = list(map(float,param_values))
             ticks.sort()
+            
+            ax.scatter(x,y)
+            ax.set_title(f'{pretty_names[test_param]}')
+            ax.set_xticks(ticks)
+            ax.ticklabel_format(style='sci',scilimits=(0,1000),axis='both')
+
+            ax.set_ylim(0,1.1)
+
+            plt.figure('single_plot')
+            plt.scatter(x,y)
+            plt.title(f'mean return improvement rate (first {num_els} iterations)')
+            plt.xlabel(f'{pretty_names[test_param]}')
+            
             plt.xticks(ticks)
+            plt.ticklabel_format(style='sci',scilimits=(0,1000),axis='both')
             plt.ylabel('normalized episode return improvement rate')
             plt.ylim(0,1.1)
             plt.savefig(f'{path.join(script_dir,results_dir)}/convergence_{test_param}.png')
-            plt.clf()
+            plt.close()
+    
+    fig.savefig(f'{path.join(script_dir,results_dir)}/convergence_cluster.png')
+    plt.close(fig)
+
             
 
 
