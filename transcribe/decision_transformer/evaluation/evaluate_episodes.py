@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-
+import tf_agents
 
 def evaluate_episode(
         env,
@@ -76,6 +76,7 @@ def evaluate_episode_rtg(
         mode='normal',
     ):
 
+
     # placeholders
     states = tf.zeros((0,state_dim))
     actions = tf.zeros((0,act_dim))
@@ -91,10 +92,10 @@ def evaluate_episode_rtg(
 
     episode_return, episode_length = 0, 0
     for t in range(max_ep_len):
-        
+        # print(t)
         actions = tf.concat([actions, tf.zeros((1,act_dim))], axis=0)
         rewards = tf.concat([rewards, tf.zeros(1)], axis=0)
-        
+        # print("get action")
         action = model.get_action(
             (states - state_mean) / state_std,
             actions,
@@ -106,10 +107,11 @@ def evaluate_episode_rtg(
         actions = tf.concat([actions[:-1],tf.expand_dims(action,axis=0)], axis=0)
         # actions[-1,:] = action
         # action = action.detach().cpu().numpy()
-
+        # print("apply action")
         state, reward, done, _ = env.step(action.numpy())
-        print(f'evaluate_episode_rtg() states.shape {states.shape}')
-        print(f'evaluate_episode_rtg() state.shape {state.shape}')
+        # print('update tensors')
+        # print(f'evaluate_episode_rtg() states.shape {states.shape}')
+        # print(f'evaluate_episode_rtg() state.shape {state.shape}')
 
         states = tf.concat([states, tf.expand_dims(tf.cast(state, dtype=tf.float32),axis=0)], axis=0)
         rewards = tf.concat([rewards[:-1],tf.expand_dims(tf.cast(reward, dtype=tf.float32),axis=0)], axis=0)

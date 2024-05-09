@@ -1,6 +1,6 @@
 export PYTHONUNBUFFERED="true"
 
-python -m cProfile -o exp.profile experiment.py --env hopper --dataset medium --max_iters 1  | tee "hopper-medium.log"
+python -m cProfile -o exp.profile experiment.py --env hopper --dataset medium --num_eval_episodes 10 | tee "hopper-medium.log"
 # --max_iters 1 --num_steps_per_iter 1 --num_eval_episodes 1
 # snakeviz exp.profile
 

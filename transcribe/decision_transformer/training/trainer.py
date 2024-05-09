@@ -33,7 +33,7 @@ class Trainer:
             #     self.scheduler.step()
 
         logs['time/training'] = time.time() - train_start
-
+        print('starting eval')
         eval_start = time.time()
 
         # self.model.eval()

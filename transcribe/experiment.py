@@ -23,12 +23,12 @@ def discount_cumsum(x, gamma):
     return discount_cumsum
 
 class WarmupLR(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_learning_rate, warmup_steps, *args, **kwargs):
-        self.initial_learning_rate = initial_learning_rate
+    def __init__(self, target_learning_rate, warmup_steps, *args, **kwargs):
+        self.target_learning_rate = target_learning_rate
         self.warmup_steps = warmup_steps
 
     def __call__(self, step):
-        return tf.minimum((step+1)/self.warmup_steps, 1)
+        return tf.minimum((step+1)/self.warmup_steps, 1)*self.target_learning_rate
 
 def experiment(
         exp_prefix,
@@ -47,16 +47,19 @@ def experiment(
         max_ep_len = 1000
         env_targets = [3600, 1800]  # evaluation conditioning targets
         scale = 1000.  # normalization for rewards/returns
+        gym_env_id = 'Hopper-v3'
     elif env_name == 'halfcheetah':
         env = gym.make('HalfCheetah-v3')
         max_ep_len = 1000
         env_targets = [12000, 6000]
         scale = 1000.
+        gym_env_id = 'HalfCheetah-v3'
     elif env_name == 'walker2d':
         env = gym.make('Walker2d-v3')
         max_ep_len = 1000
         env_targets = [5000, 2500]
         scale = 1000.
+        gym_env_id = 'Walker2d-v3'
     elif env_name == 'reacher2d':
         from decision_transformer.envs.reacher_2d import Reacher2dEnv
         env = Reacher2dEnv()
@@ -152,6 +155,8 @@ def experiment(
             replace=True,
             p=p_sample,  # reweights so we sample according to length
         )
+        # NOTE:remove
+        # batch_source_indices = np.zeros(shape=batch_size)
 
         # s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
         
@@ -162,6 +167,8 @@ def experiment(
         # print(len(batch_lens))
 
         start_indices = [random.randint(0, batch_len - 1) for batch_len in batch_lens]
+        # NOTE:remove
+        # start_indices = [0 for _ in batch_lens]
         # print(len(start_indices))
         end_indices = list(map(lambda x,y: min(x+max_len, y), start_indices, batch_lens))
         # print(len(end_indices))
@@ -185,7 +192,7 @@ def experiment(
             a[i,-seq_len:,:] = traj['actions'][t_steps]
             r[i,-seq_len:] = traj['rewards'][t_steps]
             d[i,-seq_len:] = traj['dones'][t_steps]
-            rtg[i,-seq_len:] = traj['rtg'][t_steps]
+            rtg[i,-seq_len:] = traj['rtg'][t_steps] / scale
             mask[i,-seq_len:] = np.ones((seq_len,),dtype=np.bool_)
 
         s -= state_mean
@@ -231,7 +238,8 @@ def experiment(
     def eval_episodes(target_rew):
         def fn(model):
             returns, lengths = [], []
-            for _ in range(num_eval_episodes):
+            for i in range(num_eval_episodes):
+                print(f'starting eval {i}')
                 #NOTE: with torch.no_grad():
                 if model_type == 'dt':
                     ret, length = evaluate_episode_rtg(

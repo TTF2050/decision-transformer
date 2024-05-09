@@ -89,7 +89,7 @@ RUN python -m venv --system-site-packages .env \
     && . .env/bin/activate \
     && pip install gymnasium torch "tensorflow==2.15" carla wandb "cython<3" mujoco \
      transformers atari-py opencv-python blosc dopamine-rl dopaminekit \
-     tensorflow-estimator tensorflow-datasets \
+     tensorflow-estimator tensorflow-datasets tf-agents \
      ray[all]
      #git+https://github.com/Farama-Foundation/d4rl@master#egg=d4rl
 

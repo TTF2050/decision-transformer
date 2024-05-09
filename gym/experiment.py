@@ -122,11 +122,15 @@ def experiment(
             replace=True,
             p=p_sample,  # reweights so we sample according to timesteps
         )
+        #NOTE: remove
+        # batch_inds = np.zeros(shape=batch_size,dtype=np.int32)
 
         s, a, r, d, rtg, timesteps, mask = [], [], [], [], [], [], []
         for i in range(batch_size):
             traj = trajectories[int(sorted_inds[batch_inds[i]])]
             si = random.randint(0, traj['rewards'].shape[0] - 1)
+            #NOTE: remove
+            # si = 0
 
             # get sequences from dataset
             s.append(traj['observations'][si:si + max_len].reshape(1, -1, state_dim))
@@ -176,8 +180,8 @@ def experiment(
         mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
 
         # print(f'rtg.shape {rtg.shape}')
-        print(f'get_batch() s.shape {s.shape} | a.shape {a.shape} | r.shape {r.shape} | d.shape {d.shape}')
-        print(f'get_batch() timesteps {timesteps}')
+        # print(f'get_batch() s.shape {s.shape} | a.shape {a.shape} | r.shape {r.shape} | d.shape {d.shape}')
+        # print(f'get_batch() timesteps {timesteps}')
 
         return s, a, r, d, rtg, timesteps, mask
 
